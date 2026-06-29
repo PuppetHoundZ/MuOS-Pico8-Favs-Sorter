@@ -33,3 +33,11 @@ The interface relies entirely on raw hardware inputs mapped directly from the de
 * **Dynamic Category Reordering:** Manage layout ordering by pressing `L2`/`R2` directly in the Category column to shift section placements on your next save.
 * **Robust File-Safety Guardrails:**
   * **Atomically-Safe Overwrites:** Writes directly to a secondary
+
+ ---
+
+## 🍓 Also Available for Raspberry Pi OS
+
+If you're sorting PICO-8 favourites on a **Raspberry Pi**, check out the companion project:
+
+👉 [pico8-fav-sorter](https://github.com/PuppetHoundZ/pico8-fav-sorter) — GTK3 GUI favourites sorter for Raspberry Pi OS with BBS tag enrichment, auto-sorting, and touchscreen support

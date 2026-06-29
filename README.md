@@ -1,4 +1,4 @@
-# PICO-8 Favourites Sorter — muOS Edition (v1.3.2)
+# PICO-8 Favourites Sorter — muOS Edition
 
 A lightweight, standalone Python 3 utility featuring a custom graphical user interface (GUI) designed to organize, filter, and categorize your PICO-8 Splore favorites. Optimized explicitly for the **Anbernic RG Cube XX** (720×720 screen resolution) running **MustardOS / muOS**.
 

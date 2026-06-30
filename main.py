@@ -1,10 +1,28 @@
 #!/usr/bin/env python3
 # =============================================================================
-# PICO-8 Favourites Sorter — muOS Edition  v1.7.9
+# PICO-8 Favourites Sorter — muOS Edition  v1.7.10
 # For: Anbernic RG Cube XX (720×720) running MustardOS
 # Pure Python 3 + SDL2 via ctypes. No pip, no extras needed.
 #
 # Changelog:
+#   v1.7.10 (2026-06-30) — Fix 12: missing `import time` — NameError crash.
+#                                 `import time` was absent from the top-level
+#                                 import line entirely, while time.monotonic()
+#                                 is called in 10+ places: the marquee-scroll
+#                                 helper (_mq_offset, used by ALL THREE panels
+#                                 — left/cats/right — whenever the highlighted
+#                                 row's text overflows its column width),
+#                                 toast notifications (_toast/_draw_main_bg),
+#                                 and both BBS-fetch watchdogs (regular +
+#                                 suggest-categories). Reported symptom:
+#                                 moving the selector into the categories
+#                                 column after picking an Unsorted entry threw
+#                                 "NameError: name 'time' is not defined" —
+#                                 that's _mq_offset firing because the
+#                                 category name overflowed the column and
+#                                 became the active marquee target. Same crash
+#                                 would equally hit toasts and BBS fetches.
+#                                 Fixed by adding `time` to the import line.
 #   v1.7.9 (2026-06-30) — Fix 11: silent boot-crash blind spot.
 #                                 main()'s startup sequence (SDL_Init ->
 #                                 SDL_CreateWindow -> SDL_CreateRenderer ->
@@ -15,36 +33,20 @@
 #                                 /tmp/pico8sorter_crash.log, but a failure
 #                                 during startup itself just died with a
 #                                 Python traceback to stderr, which muOS has
-#                                 nowhere to show and nowhere to save. This
-#                                 is the most likely explanation for "app
-#                                 still doesn't boot" with no diagnostic
-#                                 trail to go on. Extracted startup into
-#                                 _boot(), wrapped end-to-end: SDL_Init,
-#                                 SDL_CreateWindow, and SDL_CreateRenderer
-#                                 failures now check their return value
-#                                 (previously unchecked — a NULL window
-#                                 would silently propagate into
-#                                 CreateRenderer and crash deeper with no
-#                                 hint of the real cause) and log
-#                                 SDL_GetError() before exiting; Renderer()
-#                                 and App() init failures are caught and
-#                                 logged with full traceback before
-#                                 re-raising. Also set SDL_GetError's ctypes
-#                                 restype to c_char_p (was unset/default
-#                                 int, which truncates the returned char*
-#                                 pointer — would itself segfault or return
-#                                 garbage on a 64-bit build). Also widened
-#                                 _load()'s try/except to cover
-#                                 reconcile_stripped_categories() (Fix 6/7),
-#                                 which previously ran unguarded on every
-#                                 auto-load — defense in depth even though
-#                                 load_master_categories()/
-#                                 find_backups_newest_first() already catch
-#                                 their own errors internally.
+#                                 nowhere to show and nowhere to save.
+#                                 Extracted startup into _boot(), wrapped
+#                                 end-to-end: SDL_CreateWindow/
+#                                 SDL_CreateRenderer return values are now
+#                                 checked and SDL_GetError() is logged before
+#                                 exiting; Renderer()/App() init failures are
+#                                 caught, logged with full traceback, then
+#                                 re-raised. SDL_GetError's ctypes restype
+#                                 set to c_char_p (was unset/default int —
+#                                 truncates the pointer on 64-bit). _load()'s
+#                                 try/except widened to cover
+#                                 reconcile_stripped_categories() too.
 #                                 NEXT TIME IT FAILS TO BOOT: check
-#                                 /tmp/pico8sorter_crash.log first — it will
-#                                 now contain the real cause instead of
-#                                 nothing.
+#                                 /tmp/pico8sorter_crash.log first.
 #
 #   v1.7.8 (2026-06-30) — Fix 10: category-move data loss + Reload feature.
 #                                 BUG FOUND (serious): _assign() removed the
@@ -200,38 +202,9 @@
 #                                 25-group synthetic stress test confirmed
 #                                 every group stays reachable across repeated
 #                                 DOWN wraparound with no drift.
-#   v1.7.4 (2026-06-30) — Fix 8: portable master list + duplicate review UI.
-#                                 export_master_categories()/
-#                                 import_master_categories(): the master
-#                                 JSON (Fix 7) doubles as a full-history,
-#                                 portable database — export copies it to
-#                                 any path (SD root, USB share, etc.);
-#                                 import merges an external master into the
-#                                 local one per-slug, newer last_seen wins,
-#                                 never deletes local-only history. Tested
-#                                 device-A export -> device-B import merge.
-#                                 find_author_title_duplicates() +
-#                                 find_all_duplicate_groups(): duplicate
-#                                 detection now also catches same-author +
-#                                 near-identical-title carts that were
-#                                 re-uploaded under a different cart ID (not
-#                                 just same-base revision dupes from Fix 7).
-#                                 New menu items (X menu): "Find duplicates"
-#                                 walks a queued confirm-dialog per group —
-#                                 A = keep newest revision / remove the rest,
-#                                 B = keep all and move to next group.
-#                                 Identity-based removal throughout (`is`,
-#                                 never `==`), per the project's core dedup
-#                                 safety rule. Also fixed a latent S_CONFIRM
-#                                 bug found while building this: confirm_cb
-#                                 ran AFTER self.screen was reset to S_MAIN,
-#                                 so a callback re-opening S_CONFIRM (needed
-#                                 for the duplicate-review queue) got
-#                                 silently stomped. Reordered: state resets
-#                                 first, then callback runs and can re-chain.
-#
-# Earlier history (v1.0.0–v1.7.3), condensed — see git/backup archive for
-# full entries if ever needed:
+# Earlier history (v1.0.0–v1.7.4), condensed:
+#   v1.7.4 — Fix 8: portable master list (export/import-merge), author/title
+#            fuzzy duplicate detection, S_CONFIRM callback-ordering fix.
 #   v1.7.3 — Fix 7: persistent master-category JSON (favourites.txt.master.json),
 #            append-only slug history; reconcile prefers it over .bak_* scanning.
 #   v1.7.2 — Fix 6: PICO-8 category-strip recovery via newest-good .bak_* scan,
@@ -295,7 +268,7 @@
 #   SELECT       Quit to muOS
 # =============================================================================
 
-import ctypes, ctypes.util, json, os, re, shutil, sys, threading, queue
+import ctypes, ctypes.util, json, os, re, shutil, sys, threading, queue, time
 import urllib.request
 from datetime import datetime
 
@@ -3501,8 +3474,7 @@ _BOOT_LOG = "/tmp/pico8sorter_crash.log"
 def _boot_log(msg):
     """Best-effort write to the crash log. Startup has no other way to
     surface a failure — muOS gives the process no console, so an
-    uncaught exception here previously meant total silence: the app
-    just didn't appear, with zero trace of why."""
+    uncaught exception here previously meant total silence."""
     try:
         with open(_BOOT_LOG, "a") as _f:
             _f.write(msg)

@@ -1,65 +1,241 @@
 #!/usr/bin/env python3
 # =============================================================================
-# PICO-8 Favourites Sorter — muOS Edition  v1.7.6
+# PICO-8 Favourites Sorter — muOS Edition  v1.7.8
 # For: Anbernic RG Cube XX (720×720) running MustardOS
 # Pure Python 3 + SDL2 via ctypes. No pip, no extras needed.
 #
 # Changelog:
-#   v1.7.6 (2026-06-29) — Fix BB: write_file kept a rotating set of up to 3
-#                                 timestamped backups (favourites.txt.bak_*)
-#                                 instead of the single overwriting .bak file
-#                                 the Pi version uses — caused duplicate
-#                                 backups to accumulate on the SD card.
-#                                 Reverted to single .bak (overwritten each
-#                                 save), matching Pi version exactly. Old
-#                                 rotating .bak_* files from v1.7.4 and
-#                                 earlier are cleaned up automatically on
-#                                 next save. Unused `datetime` import removed.
-#   v1.7.5 (2026-06-29) — Fix AA: Left panel ALL ENTRIES browse mode — category
-#                                 line (3rd line of each row) sat too close to
-#                                 the author line, causing visual overlap.
-#                                 Author->category gap was 11px (_sy(24) to
-#                                 _sy(35)) vs the title->author gap of 22px.
-#                                 Category line moved from _sy(35) to _sy(40),
-#                                 widening the gap to 16px. Row height (_sy(54))
-#                                 has headroom for the shift.
-#   v1.7.4 (2026-06-29) — Fix ZZ: v1.7.3's new duplicate-removal code used
-#                                 list.remove(e), which matches by value
-#                                 (dict equality) not identity. Two entries
-#                                 with identical field values (a genuinely
-#                                 duplicated raw line) could cause the wrong
-#                                 object to be removed. Violates the project's
-#                                 identity-removal rule. Rewrote as a single
-#                                 identity-based filter pass — no .remove().
-#   v1.7.3 (2026-06-29) — Sync YY: Pi version comparison audit.
-#                                 Bug A: write_file unsorted order reversed vs
-#                                   Pi. Pi writes raw unsorted (newest, prepend
-#                                   stack) FIRST, then UNSORTED section bucket.
-#                                   MU had them swapped — UNSORTED section came
-#                                   first, burying newest entries below stale
-#                                   UNSORTED section entries on reload. Fixed:
-#                                   remaining = list(unsorted) + sections.get()
-#                                 Bug B: _load() has no duplicate slug detection.
-#                                   Pi warns and offers auto-remove. muOS now
-#                                   silently deduplicates (first occurrence wins,
-#                                   same Pi auto-remove logic) and appends count
-#                                   to status. Prevents confusing state where the
-#                                   same cart appears in two categories.
-#                                 Bug C: _sg_build_cards passes full _sg_tag_cache
-#                                   to suggest_new_categories_from_tags regardless
-#                                   of current scope. Pi filters cache to only
-#                                   entries in current pool before passing. When
-#                                   scope is "unsorted" but cache was built in
-#                                   "all" mode, categorised entries polluted the
-#                                   unsorted suggestions. Fixed: filter cache to
-#                                   pool in _sg_build_cards matching Pi logic.
-#   v1.7.2 (2026-06-29) — Fix XX: Missing `import time` — crash on any
-#                                 call to time.monotonic() (marquee scroll,
-#                                 BBS fetch watchdog, toast, suggest BBS
-#                                 watchdog). App booted but crashed the
-#                                 moment marquee activated (highlighted item
-#                                 in any panel) or BBS fetch started.
-#                                 Fixed: `time` added to top-level imports.
+#   v1.7.8 (2026-06-30) — Fix 10: category-move data loss + Reload feature.
+#                                 BUG FOUND (serious): _assign() removed the
+#                                 entry from its source list BEFORE showing
+#                                 the "may already be in target — move
+#                                 anyway?" confirm dialog. Declining (B) had
+#                                 no skip-callback, so the entry was simply
+#                                 never re-added anywhere — gone from every
+#                                 list, with no recovery short of reloading
+#                                 the whole file. Reproduced with an
+#                                 identity-based check (not slug equality,
+#                                 since the bug specifically only manifests
+#                                 when a slug-duplicate already exists in
+#                                 the target, which is exactly when the
+#                                 dialog appears). Fixed by capturing the
+#                                 list the entry was removed from and wiring
+#                                 a confirm_skip_cb that restores it there
+#                                 on decline. Verified: decline restores to
+#                                 source (incl. when source is a real
+#                                 category, not just Unsorted), confirm
+#                                 still moves it, and the ordinary no-
+#                                 duplicate move path is unaffected.
+#                                 NEW: "Reload file (discard changes)" in
+#                                 the X menu — re-parses favourites.txt from
+#                                 disk via the same _load() path as startup
+#                                 (so it also re-runs Fix 6/7 strip
+#                                 recovery), behind a confirm dialog.
+#                                 BUG FOUND while building this: _load()'s
+#                                 category-merge logic merged the file's
+#                                 headers against self.categories — the
+#                                 LIVE, possibly-dirty in-memory list. An
+#                                 unsaved "Add category" would therefore
+#                                 survive a reload, defeating the point of
+#                                 "discard changes." Fixed to merge against
+#                                 the fixed DEFAULT_CATS baseline instead
+#                                 (also makes "Change file path" correctly
+#                                 stop carrying over an old file's custom
+#                                 categories into an unrelated new file).
+#                                 Verified with a combined stress test:
+#                                 delete an entry, manually duplicate
+#                                 another, add a stray unsorted entry, add
+#                                 an unsaved category, and scramble category
+#                                 contents — Reload exactly restores the
+#                                 last-saved-on-disk state in every respect.
+#   v1.7.7 (2026-06-30) — Fix 9: category create/rename/delete safety audit.
+#                                 Two real bugs found by deliberately
+#                                 stress-testing category mutation against
+#                                 the master-record system:
+#                                 (1) Deleting or renaming a category only
+#                                 updated in-memory state + favourites.txt —
+#                                 the master JSON kept the OLD category
+#                                 name for those slugs until the next
+#                                 "Save file". If PICO-8 stripped the file
+#                                 in that window, reconcile_stripped_
+#                                 categories() would faithfully recover
+#                                 entries into the just-deleted/renamed
+#                                 category, silently undoing the user's
+#                                 action. Fixed with new
+#                                 set_master_category_for_entries(), called
+#                                 immediately from both _rename_category and
+#                                 _delete_category — delete marks the
+#                                 displaced slugs cat="UNSORTED" in master
+#                                 (excluded from recovery, but history kept
+#                                 for the "back up every favourite ever
+#                                 categorized" master-list goal); rename
+#                                 re-keys them to the new name right away.
+#                                 Verified: simulated delete -> immediate
+#                                 PICO-8 strip -> reconcile no longer
+#                                 resurrects the deleted category, entries
+#                                 correctly stay unsorted.
+#                                 (2) "Add category" / "Rename category"
+#                                 had no guard against the name "UNSORTED" —
+#                                 since self.categories normally never
+#                                 contains "UNSORTED" (it's a reserved
+#                                 internal bucket), creating/renaming TO it
+#                                 passed the existing "already exists" check
+#                                 and then did self.sections["UNSORTED"]=[]
+#                                 (Add) or sections["NEW"]=sections.pop(old)
+#                                 with NEW="UNSORTED" (Rename) — both SILENTLY
+#                                 WIPED whatever was actually sitting in the
+#                                 real unsorted bucket. Reproduced the data
+#                                 loss, then added an explicit reserved-name
+#                                 check to both paths with a clear status
+#                                 message instead. Verified via the real
+#                                 dispatch methods (not just the closures in
+#                                 isolation) that the unsorted bucket and
+#                                 existing category data are untouched and
+#                                 the operation is cleanly rejected.
+#   v1.7.6 (2026-06-30) — Bug found in full-pipeline double-check.
+#                                 find_duplicate_groups() used
+#                                 e.get("base", e["slug"]) to fall back to
+#                                 the entry's own slug when "base" was
+#                                 missing — but parse_entry() ALWAYS sets
+#                                 "base" (possibly to "" on a malformed/
+#                                 blank column 2), and dict.get()'s default
+#                                 only triggers when the key is absent, not
+#                                 when it's present-but-falsy. Result: every
+#                                 entry with a blank base column in the file
+#                                 would get silently grouped together as
+#                                 "duplicates" of each other, regardless of
+#                                 how unrelated they actually were. Fixed to
+#                                 `e.get("base") or e["slug"]`. Verified the
+#                                 false-positive is gone and real same-base
+#                                 revision groups still detect correctly.
+#                                 Also ran a full combined regression across
+#                                 every Fix 6/7/8 piece together in one
+#                                 scenario: organize+save (master populates)
+#                                 -> PICO-8 strip+add-new-revision -> reconcile
+#                                 (existing slug recovers, brand-new revision
+#                                 correctly stays unsorted rather than being
+#                                 guessed) -> duplicate detection correctly
+#                                 finds the cross-bucket (categorized vs
+#                                 unsorted) revision pair -> save -> prune
+#                                 (stale entry dropped, fresh kept) -> export
+#                                 -> import-merge onto a second simulated
+#                                 device. All steps passed together, not
+#                                 just in isolation.
+#   v1.7.5 (2026-06-30) — Bug audit + dedicated duplicate-review screen.
+#                                 BUG FOUND & FIXED (regression from v1.7.4):
+#                                 the action menu (X) caps its panel height
+#                                 but had no scroll offset. Adding "Find
+#                                 duplicates"/"Export/Import master list"
+#                                 pushed the item count past what fits on a
+#                                 720x720 panel (14-16 items vs ~12 visible
+#                                 rows), silently clipping "Quit" and
+#                                 "Cancel" off-screen — act_idx could still
+#                                 cycle onto them via DOWN, but they were
+#                                 invisible and effectively unreachable in
+#                                 practice. Fixed with act_scroll, kept in
+#                                 sync by _h_action via _action_visible_rows()
+#                                 (shared capacity calc used by both the
+#                                 handler and _draw_action so they can't
+#                                 drift apart), plus ▲/▼ scroll indicators.
+#                                 Verified by simulating 16-item DOWN-cycling
+#                                 — every item stays reachable, scroll never
+#                                 leaves valid bounds.
+#                                 NEW: S_DUPES — replaces the old one-at-a-
+#                                 time queued confirm-dialog duplicate flow
+#                                 with a real scrollable overview screen
+#                                 (UP/DOWN browse groups, A = resolve via
+#                                 confirm dialog [keep-latest/keep-both],
+#                                 Y = jump into ALL ENTRIES pre-filtered on
+#                                 that title for manual side-by-side review,
+#                                 B = close). Built _dupes_visible_rows()
+#                                 using the exact same geometry constants as
+#                                 _draw_dupes() from the start, specifically
+#                                 to avoid repeating the action-menu bug.
+#                                 Verified: keep-latest removes the correct
+#                                 (older) entries by identity and keeps the
+#                                 newest revision; keep-both leaves both
+#                                 entries untouched; author/title fuzzy
+#                                 groups never auto-delete, only point at Y;
+#                                 25-group synthetic stress test confirmed
+#                                 every group stays reachable across repeated
+#                                 DOWN wraparound with no drift.
+#   v1.7.4 (2026-06-30) — Fix 8: portable master list + duplicate review UI.
+#                                 export_master_categories()/
+#                                 import_master_categories(): the master
+#                                 JSON (Fix 7) doubles as a full-history,
+#                                 portable database — export copies it to
+#                                 any path (SD root, USB share, etc.);
+#                                 import merges an external master into the
+#                                 local one per-slug, newer last_seen wins,
+#                                 never deletes local-only history. Tested
+#                                 device-A export -> device-B import merge.
+#                                 find_author_title_duplicates() +
+#                                 find_all_duplicate_groups(): duplicate
+#                                 detection now also catches same-author +
+#                                 near-identical-title carts that were
+#                                 re-uploaded under a different cart ID (not
+#                                 just same-base revision dupes from Fix 7).
+#                                 New menu items (X menu): "Find duplicates"
+#                                 walks a queued confirm-dialog per group —
+#                                 A = keep newest revision / remove the rest,
+#                                 B = keep all and move to the next group.
+#                                 Author/title fuzzy matches are surfaced as
+#                                 info-only (no guessed deletion, since cross-
+#                                 cart-ID recency isn't reliably knowable) —
+#                                 review those manually via ALL ENTRIES.
+#                                 "Export master list" / "Import master
+#                                 list" added alongside it. Removal uses
+#                                 identity-based matching (`is`, never `==`),
+#                                 per the project's core dedup-safety rule.
+#                                 Also fixed a latent S_CONFIRM bug while
+#                                 here: confirm_cb was invoked AFTER
+#                                 self.screen was forced back to S_MAIN,
+#                                 so a callback that re-opened S_CONFIRM
+#                                 (needed for the duplicate-review queue)
+#                                 would get silently stomped back to
+#                                 S_MAIN. Reordered so state resets first,
+#                                 then the callback runs and can re-chain.
+#   v1.7.3 (2026-06-30) — Fix 7: persistent master-category JSON + dup aid.
+#                                 New favourites.txt.master.json sits beside
+#                                 favourites.txt: append-only slug->category
+#                                 record, upserted on every save via
+#                                 update_master_categories(). Never rotated,
+#                                 never touched by PICO-8 — survives across
+#                                 the whole project history, not just the
+#                                 last 3 backups.
+#                                 reconcile_stripped_categories() (Fix 6) now
+#                                 prefers the master record, falling back to
+#                                 .bak_* scan only for slugs the master
+#                                 doesn't know yet (e.g. first run).
+#                                 New: prune_master_categories(path,
+#                                 keep_days) — cleanup tool to drop master
+#                                 entries not seen in N days, callable any
+#                                 time without touching favourites.txt.
+#                                 New: find_duplicate_groups() — groups
+#                                 entries by BBS base/cart ID (revision-
+#                                 suffix aware) as a review aid. Deliberately
+#                                 NOT auto-deleting: -N suffixes are often
+#                                 legitimate PICO-8 revisions, not dupes.
+#                                 UI wiring (menu entries for prune/dedupe
+#                                 review) is the next step, not yet added.
+#   v1.7.2 (2026-06-29) — Fix 6: recover categories PICO-8 strips on save.
+#                                 When PICO-8/Splore itself writes a new
+#                                 favourite to favourites.txt, it rewrites
+#                                 the file and drops all our "# === CAT ==="
+#                                 headers while preserving entry order.
+#                                 On load, if the file has zero headers but
+#                                 the newest .bak_* backup has categories,
+#                                 rebuild a slug->category map from that
+#                                 backup and re-assign current entries by
+#                                 slug (not position). Entries not found in
+#                                 the map (genuinely new PICO-8 favourites)
+#                                 stay unsorted. Guarded by a 30% overlap
+#                                 threshold so an unrelated/stale backup
+#                                 can't mis-categorise a real flat file.
+#                                 Nothing is written to disk until the user
+#                                 explicitly saves (START) — load remains
+#                                 read-only on disk. New: find_latest_backup(),
+#                                 reconcile_stripped_categories().
 #   v1.7.1 (2026-06-29) — Feature WW: Rename category, Delete category,
 #                                 duplicate detection on assign.
 #                                 Rename: X menu (when cat open) -> Rename
@@ -319,8 +495,9 @@
 #   SELECT       Quit to muOS
 # =============================================================================
 
-import ctypes, ctypes.util, os, re, shutil, sys, threading, queue, time
+import ctypes, ctypes.util, json, os, re, shutil, sys, threading, queue
 import urllib.request
+from datetime import datetime
 
 # =============================================================================
 # SDL2 bootstrap
@@ -1096,34 +1273,27 @@ def parse_file(path):
     return sections, cat_order, unsorted
 
 def write_file(path, categories, sections, unsorted):
-    # Single .bak file — overwritten on every save. Matches Pi version
-    # behaviour exactly (one backup, not a rotating set).
-    backup = path + ".bak"
-    if os.path.exists(backup):
-        os.remove(backup)
-    shutil.copy2(path, backup)
-
-    # One-time cleanup: remove leftover rotating timestamped backups from
-    # v1.7.4 and earlier (favourites.txt.bak_YYYYMMDD_HHMMSS) so old installs
-    # don't accumulate orphaned files forever.
-    try:
-        bak_dir  = os.path.dirname(os.path.abspath(path))
-        bak_base = os.path.basename(path) + ".bak_"
-        for f in os.listdir(bak_dir):
-            if f.startswith(bak_base):
-                try:
-                    os.remove(os.path.join(bak_dir, f))
-                except OSError:
-                    pass
-    except OSError:
-        pass
+    # FIX(bug4): rotate timestamped backups — keep only last 3 so the SD
+    # card is not silently filled after many saves.
+    ts_bak = path + ".bak_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+    shutil.copy2(path, ts_bak)
+    bak_dir  = os.path.dirname(os.path.abspath(path))
+    bak_base = os.path.basename(path) + ".bak_"
+    existing = sorted(
+        f for f in os.listdir(bak_dir) if f.startswith(bak_base)
+    )
+    while len(existing) > 3:
+        try:
+            os.remove(os.path.join(bak_dir, existing.pop(0)))
+        except OSError:
+            pass
 
     out = []
     # FIX(unsorted-header): unsorted entries must be written FIRST with no
     # section header so PICO-8 Splore treats them as unorganised entries, not
     # as a named category called "UNSORTED".  The old code wrote them last
     # under a "# UNSORTED" wrapper which made Splore show an extra category.
-    remaining = list(unsorted) + sections.get("UNSORTED",[])
+    remaining = sections.get("UNSORTED",[]) + unsorted
     if remaining:
         out += [e["raw"] for e in remaining]
         out.append("")
@@ -1142,7 +1312,354 @@ def write_file(path, categories, sections, unsorted):
     with open(tmp, "w", encoding="utf-8") as _wf:
         _wf.write("\n".join(out))
     os.replace(tmp, path)
-    return backup
+    update_master_categories(path, categories, sections)
+    return ts_bak
+
+# =============================================================================
+# FIX(bug7): persistent master-category JSON.
+#
+# .bak_* backups are a good *short-term* safety net (Fix 6) but they rotate
+# (only the last 3 are kept) and are themselves taken pre-write, so a run of
+# PICO-8 strip events without an intervening app save can age them out.
+#
+# favourites.master.json sits next to favourites.txt and is a simple,
+# append-only slug -> last-known-category record that is NEVER pruned by
+# rotation and NEVER touched by PICO-8 (PICO-8 doesn't know it exists). Every
+# time the user saves in this app, every categorised slug gets upserted with
+# its category + a last_seen timestamp. This becomes the primary source for
+# Fix 6 recovery; the .bak_* scan remains as a fallback for slugs the master
+# file doesn't know about yet (e.g. its very first run on an existing file).
+# =============================================================================
+
+MASTER_SCHEMA_VERSION = 1
+
+def master_path_for(path):
+    return path + ".master.json"
+
+def load_master_categories(path):
+    """Returns {} on missing/corrupt file — never raises."""
+    mpath = master_path_for(path)
+    if not os.path.exists(mpath):
+        return {}
+    try:
+        with open(mpath, encoding="utf-8") as f:
+            data = json.load(f)
+        slugs = data.get("slugs", {})
+        return slugs if isinstance(slugs, dict) else {}
+    except Exception:
+        return {}
+
+def save_master_categories(path, slugs):
+    mpath = master_path_for(path)
+    tmp = mpath + ".tmp"
+    data = {"version": MASTER_SCHEMA_VERSION, "slugs": slugs}
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=1)
+        os.replace(tmp, mpath)
+    except Exception:
+        pass  # master file is a convenience layer — never block a save on it
+
+def update_master_categories(path, categories, sections):
+    """Upsert slug -> {cat, title, base, last_seen} for every categorised
+    entry into the master file. Called automatically from write_file()."""
+    slugs = load_master_categories(path)
+    now = datetime.now().isoformat(timespec="seconds")
+    for cat in categories:
+        if cat == "UNSORTED":
+            continue
+        for e in sections.get(cat, []):
+            slugs[e["slug"]] = {
+                "cat": cat, "title": e.get("title", ""),
+                "base": e.get("base", ""), "last_seen": now,
+            }
+    save_master_categories(path, slugs)
+
+def set_master_category_for_entries(path, entries, new_cat):
+    """
+    Directly upsert master records for specific entries to new_cat, WITHOUT
+    waiting for the next full write_file() save.
+
+    Why this exists: rename/delete-category only update in-memory state
+    (sections/categories) and favourites.txt — the master record otherwise
+    wouldn't reflect the change until the user's next "Save file". If PICO-8
+    strips favourites.txt in that window, reconcile_stripped_categories()
+    would faithfully recover entries into the OLD/deleted category name from
+    the stale master record, silently undoing the rename or deletion the
+    user just made. Calling this immediately after rename/delete closes
+    that window.
+
+    new_cat="UNSORTED" intentionally still writes a record (rather than
+    deleting it) so the slug's history (title/base) is preserved for the
+    "back up every favourite ever categorized" master-list goal — but
+    reconcile_stripped_categories() already excludes cat=="UNSORTED" records
+    from its slug->category map, so it will correctly leave these entries
+    unsorted instead of resurrecting whatever category they used to be in.
+    """
+    if not entries:
+        return
+    slugs = load_master_categories(path)
+    now = datetime.now().isoformat(timespec="seconds")
+    for e in entries:
+        slugs[e["slug"]] = {
+            "cat": new_cat, "title": e.get("title", ""),
+            "base": e.get("base", ""), "last_seen": now,
+        }
+    save_master_categories(path, slugs)
+
+def prune_master_categories(path, keep_days=180):
+    """Cleanup tool: drop master entries not seen in keep_days. Returns the
+    number of entries removed. Safe to call any time (e.g. from a menu
+    action) — does nothing destructive to favourites.txt itself."""
+    slugs = load_master_categories(path)
+    if not slugs:
+        return 0
+    cutoff = datetime.now().timestamp() - keep_days * 86400
+    kept = {}
+    removed = 0
+    for slug, rec in slugs.items():
+        try:
+            ts = datetime.fromisoformat(rec.get("last_seen", "")).timestamp()
+        except Exception:
+            ts = 0  # unparsable/missing timestamp — treat as stale
+        if ts >= cutoff:
+            kept[slug] = rec
+        else:
+            removed += 1
+    if removed:
+        save_master_categories(path, kept)
+    return removed
+
+def find_duplicate_groups(sections, unsorted):
+    """
+    Group entries that share the same 'base' (BBS cart ID) — these are
+    likely the same cart at different PICO-8 revisions (slug suffix -N),
+    NOT necessarily true duplicates, so this is a review aid, not an
+    auto-delete. Returns {base: [entries...]} for every base with >1 entry,
+    each group sorted with the highest revision suffix first (best guess
+    at "the one to keep").
+    """
+    by_base = {}
+    all_entries = list(unsorted)
+    for lst in sections.values():
+        all_entries += lst
+    for e in all_entries:
+        # NOTE: e.get("base", e["slug"]) is WRONG here — dict.get()'s default
+        # only applies when the key is missing, not when it's present-but-
+        # empty. parse_entry() always sets "base" (possibly to "" on a
+        # malformed/blank column), so that pattern would silently group
+        # every blank-base entry in the file together as "duplicates" of
+        # each other. Use `or` to treat empty string the same as missing.
+        key = e.get("base") or e["slug"]
+        by_base.setdefault(key, []).append(e)
+
+    def rev_num(e):
+        m = re.search(r"-(\d+)$", e["slug"])
+        return int(m.group(1)) if m else -1
+
+    groups = {}
+    for base, ents in by_base.items():
+        if len(ents) > 1:
+            groups[base] = sorted(ents, key=rev_num, reverse=True)
+    return groups
+
+def _norm_title(t):
+    return re.sub(r"[^a-z0-9]+", "", t.lower())
+
+def find_author_title_duplicates(sections, unsorted, exclude_bases=None):
+    """
+    Catch likely duplicates that DON'T share a base/cart ID — e.g. the same
+    cart re-uploaded to the BBS under a new ID by the same author. Groups
+    entries with an identical author AND a near-identical normalised title.
+    `exclude_bases` lets the caller skip entries already covered by
+    find_duplicate_groups() (the more reliable base-ID match) so the same
+    pair isn't reported twice.
+    """
+    exclude_bases = exclude_bases or set()
+    all_entries = list(unsorted)
+    for lst in sections.values():
+        all_entries += lst
+    by_key = {}
+    for e in all_entries:
+        if e.get("base") in exclude_bases:
+            continue
+        key = (e.get("author", "").strip().lower(), _norm_title(e.get("title", "")))
+        if not key[0] or not key[1]:
+            continue
+        by_key.setdefault(key, []).append(e)
+    return {k: v for k, v in by_key.items() if len(v) > 1}
+
+def find_all_duplicate_groups(sections, unsorted):
+    """Combined view used by the UI: list of (reason, entries) tuples."""
+    groups = []
+    base_groups = find_duplicate_groups(sections, unsorted)
+    for base, ents in base_groups.items():
+        groups.append(("same cart, different revision", ents))
+    author_groups = find_author_title_duplicates(sections, unsorted, exclude_bases=set(base_groups))
+    for key, ents in author_groups.items():
+        groups.append(("same author + title, different cart ID", ents))
+    return groups
+
+# =============================================================================
+# FIX(bug8): master list as a portable, full-history database.
+#
+# Because the master JSON already accumulates EVERY slug ever categorised
+# (not just what's currently in favourites.txt), it doubles as a portable
+# backup of the user's whole organisation history — exportable to another
+# file/device and mergeable back in without losing anything on either side.
+# =============================================================================
+
+def export_master_categories(path, dest_path):
+    """Copy the current master JSON to dest_path (e.g. an SD card root or
+    a USB-shared folder) so it can be carried to another device."""
+    mpath = master_path_for(path)
+    if not os.path.exists(mpath):
+        return False, "No master list to export yet — save at least once first."
+    try:
+        shutil.copy2(mpath, dest_path)
+        return True, dest_path
+    except Exception as e:
+        return False, str(e)
+
+def import_master_categories(path, src_path):
+    """
+    Merge an external master JSON (e.g. from another device) into this
+    file's master list. Per-slug, the record with the newer last_seen wins.
+    Never deletes local history that the import doesn't mention. Returns
+    (added_count, updated_count) or raises on a genuinely unreadable file.
+    """
+    with open(src_path, encoding="utf-8") as f:
+        incoming = json.load(f).get("slugs", {})
+    if not isinstance(incoming, dict):
+        return 0, 0
+    local = load_master_categories(path)
+    added = updated = 0
+    for slug, rec in incoming.items():
+        if not isinstance(rec, dict) or not rec.get("cat"):
+            continue
+        cur = local.get(slug)
+        if cur is None:
+            local[slug] = rec; added += 1
+        else:
+            try:
+                newer = datetime.fromisoformat(rec.get("last_seen","")) > \
+                        datetime.fromisoformat(cur.get("last_seen",""))
+            except Exception:
+                newer = False
+            if newer:
+                local[slug] = rec; updated += 1
+    save_master_categories(path, local)
+    return added, updated
+
+
+#
+# When PICO-8/Splore itself saves a NEW favourite to favourites.txt, it
+# rewrites the whole file and does NOT understand our "# === CATEGORY ==="
+# divider headers — so it drops every header but keeps all entries in their
+# original relative (sequential) order. The next time we load the file it
+# looks 100% "unsorted" even though the user had it fully organised.
+#
+# Our own write_file() always leaves a timestamped .bak_* copy behind that
+# DOES still have the headers. So on load, if we detect a file with zero
+# category headers but a prior backup that had categories, we rebuild a
+# slug -> category map from the newest such backup and re-assign each
+# current entry to its previous category by slug match (not by position —
+# position isn't trustworthy since PICO-8 may have inserted new favourites
+# anywhere in the sequence). Anything not found in the map (i.e. genuinely
+# new favourites PICO-8 just added) is left unsorted, exactly as before.
+#
+# This only changes in-memory state on load; nothing is written to disk
+# until the user explicitly saves (START), same as every other load path.
+# =============================================================================
+
+def find_backups_newest_first(path):
+    """Return all .bak_* files for path, newest first."""
+    bak_dir  = os.path.dirname(os.path.abspath(path))
+    bak_base = os.path.basename(path) + ".bak_"
+    try:
+        candidates = sorted(
+            (f for f in os.listdir(bak_dir) if f.startswith(bak_base)),
+            reverse=True,
+        )
+    except OSError:
+        return []
+    return [os.path.join(bak_dir, f) for f in candidates]
+
+def reconcile_stripped_categories(path, sections, cat_order, unsorted):
+    """
+    If the just-loaded file has no category headers at all but a recent
+    backup does, rebuild categories from the backup via slug matching.
+
+    Returns (sections, cat_order, unsorted, recovered_count, backup_name)
+    where recovered_count is 0 and backup_name is None if no recovery was
+    performed (nothing to do, or not enough overlap to trust it).
+    """
+    if cat_order:
+        # File still has headers — nothing stripped, nothing to do.
+        return sections, cat_order, unsorted, 0, None
+
+    # Primary source: the persistent master JSON (Fix 7) — never rotates,
+    # never stripped by PICO-8, accumulates across the whole project history.
+    master = load_master_categories(path)
+    slug_to_cat = {slug: rec["cat"] for slug, rec in master.items()
+                   if rec.get("cat") and rec["cat"] != "UNSORTED"}
+    master_cats_seen = list(dict.fromkeys(rec["cat"] for rec in master.values()
+                                           if rec.get("cat") and rec["cat"] != "UNSORTED"))
+    source_name = "master record" if slug_to_cat else None
+
+    # Fallback / supplement: scan .bak_* backups newest-to-oldest for any
+    # category headers the master file doesn't already cover (e.g. the very
+    # first run before a master file existed yet). Backups are copied BEFORE
+    # each write, so the newest backup can itself be a stripped snapshot —
+    # use the first one that actually still has categories.
+    for candidate in find_backups_newest_first(path):
+        if not os.path.exists(candidate):
+            continue
+        try:
+            cand_sections, cand_order, _cand_unsorted = parse_file(candidate)
+        except Exception:
+            continue
+        if cand_order:
+            for cat in cand_order:
+                if cat == "UNSORTED":
+                    continue
+                for e in cand_sections.get(cat, []):
+                    slug_to_cat.setdefault(e["slug"], cat)
+                    if cat not in master_cats_seen:
+                        master_cats_seen.append(cat)
+            if source_name is None:
+                source_name = os.path.basename(candidate)
+            break
+
+    if not slug_to_cat:
+        return sections, cat_order, unsorted, 0, None
+
+    # Sanity check: only proceed if a meaningful fraction of the CURRENT
+    # entries are recognised. A low-overlap result is more likely an
+    # unrelated/very-old record than a genuine PICO-8 strip event, so we
+    # play it safe and leave everything unsorted in that case.
+    total_current = len(unsorted) + sum(len(v) for v in sections.values())
+    if total_current == 0:
+        return sections, cat_order, unsorted, 0, None
+
+    matched = sum(1 for e in unsorted if e["slug"] in slug_to_cat)
+    if matched / total_current < 0.3:
+        return sections, cat_order, unsorted, 0, None
+
+    new_sections = {cat: [] for cat in master_cats_seen}
+    new_unsorted = []
+    for e in unsorted:
+        cat = slug_to_cat.get(e["slug"])
+        if cat and cat != "UNSORTED":
+            new_sections.setdefault(cat, []).append(e)
+        else:
+            new_unsorted.append(e)
+
+    if "UNSORTED" not in new_sections:
+        new_sections["UNSORTED"] = []
+
+    return new_sections, master_cats_seen + ["UNSORTED"], new_unsorted, matched, source_name
+
 # =============================================================================
 # Virtual keyboard  (grid, controller-navigable)
 # =============================================================================
@@ -1234,6 +1751,7 @@ S_AUTOSORT = "AUTOSORT" # auto-sort suggestion list
 S_BBSFETCH = "BBSFETCH" # BBS fetch progress screen
 S_SUGGEST  = "SUGGEST"  # suggest new categories screen
 S_SGFETCH  = "SGFETCH"  # BBS fetch for suggest-categories
+S_DUPES    = "DUPES"    # scrollable duplicate-group review screen
 
 # Focus panels
 F_LEFT  = "LEFT"
@@ -1288,6 +1806,11 @@ class App:
         # confirm
         self.confirm_msg = ""
         self.confirm_cb  = None
+        self.confirm_skip_cb = None
+        self.dupes_groups = []
+        self.dupes_idx = 0
+        self.dupes_scroll = 0
+        self.act_scroll = 0
 
         # quit flag — set by menu "Quit" option, checked in main loop
         self.quit = False
@@ -1346,36 +1869,19 @@ class App:
             sec, order, uns = parse_file(path)
         except Exception as e:
             self.status="Parse error: "+str(e); self.status_ok=False; return
-        # Duplicate slug detection — matches Pi version auto-remove logic.
-        # First occurrence in file order wins; duplicates are silently dropped.
-        # Reported in status so user knows the file was cleaned.
-        # Identity-based filtering throughout — never list.remove(e), which
-        # matches by value and can remove the wrong object when two entries
-        # have identical field values (a genuinely duplicated raw line).
-        _seen_slugs = {}
-        _dup_count  = 0
-        _uns_keep = []
-        for e in uns:
-            if e["slug"] in _seen_slugs:
-                _dup_count += 1
-            else:
-                _seen_slugs[e["slug"]] = e
-                _uns_keep.append(e)
-        uns = _uns_keep
-        for _cat, _ents in sec.items():
-            _keep = []
-            for e in _ents:
-                if e["slug"] in _seen_slugs and _seen_slugs[e["slug"]] is not e:
-                    _dup_count += 1
-                else:
-                    _seen_slugs[e["slug"]] = e
-                    _keep.append(e)
-            sec[_cat] = _keep
-
+        sec, order, uns, recovered, bak_name = reconcile_stripped_categories(path, sec, order, uns)
         self.filepath=path; self.sections=sec
         self.cat_order=order; self.unsorted=uns
+        # BUG FIX (revert correctness): merge against DEFAULT_CATS, NOT
+        # self.categories. Merging against self.categories would let an
+        # unsaved in-memory category (e.g. "Add category" never followed by
+        # "Save file") survive a reload/revert, since it's still sitting in
+        # self.categories at the moment this runs. Any category that was
+        # actually saved is safe regardless — write_file() always persists
+        # a header for every category (even empty ones), so it comes back
+        # via `order` from the file itself.
         merged=list(order)
-        for c in self.categories:
+        for c in DEFAULT_CATS:
             if c not in merged: merged.append(c)
         self.categories=merged
         if "UNSORTED" not in self.sections: self.sections["UNSORTED"]=[]
@@ -1390,8 +1896,11 @@ class App:
         cfg_save(path)
         uns_n = len(self.sections.get("UNSORTED",[]))+len(self.unsorted)
         total = sum(len(v) for v in self.sections.values())+len(self.unsorted)
-        dup_s = f"  |  {_dup_count} duplicates removed" if _dup_count else ""
-        self.status=f"{os.path.basename(path)}  |  {uns_n} unsorted  |  {total} total{dup_s}"
+        if recovered:
+            self.status=(f"{os.path.basename(path)}  |  PICO-8 stripped categories — "
+                          f"recovered {recovered} from {bak_name}  |  press START to save")
+        else:
+            self.status=f"{os.path.basename(path)}  |  {uns_n} unsorted  |  {total} total"
         self.status_ok=True
         self.R.flush()
 
@@ -1405,6 +1914,24 @@ class App:
         except Exception as e:
             self.status="Save failed: "+str(e); self.status_ok=False
         self.R.flush()
+
+    def _reload_file(self):
+        """'Revert all changes' — re-parse favourites.txt from disk, throwing
+        away every in-memory edit made since the last Save (moves, renames,
+        new/deleted categories, sort order, dedup resolutions, etc). What's
+        on disk is untouched by this — it's the same _load() path used at
+        startup, so it also re-runs Fix 6/7 strip recovery if needed."""
+        if not self.filepath:
+            self.status = "No file loaded."; self.status_ok = False; return
+        self.confirm_msg = ("Discard all changes since the last Save and "
+                             "reload from disk? This cannot be undone.")
+        def _do_reload():
+            self._load(self.filepath)
+            self.status = "Reloaded from disk — unsaved changes discarded."
+            self.status_ok = True
+        self.confirm_cb = _do_reload
+        self.confirm_skip_cb = None
+        self.screen = S_CONFIRM
 
     # ── all-entries flat list ─────────────────────────────────────────────────
 
@@ -1510,6 +2037,7 @@ class App:
         elif self.screen==S_BBSFETCH:   self._h_bbsfetch(btn)
         elif self.screen==S_SUGGEST:    self._h_suggest(btn)
         elif self.screen==S_SGFETCH:    self._h_sgfetch(btn)
+        elif self.screen==S_DUPES:      self._h_dupes(btn)
         elif self.screen in (S_KEYBOARD,S_FILTER):
             self._h_keyboard(btn)
 
@@ -1673,24 +2201,41 @@ class App:
                     lst.pop(i); return True
             return False
         if src is None:
+            removed_from = self.unsorted
             if not _remove_by_id(self.unsorted):
-                _remove_by_id(self.sections.get("UNSORTED",[]))
+                removed_from = self.sections.get("UNSORTED",[])
+                _remove_by_id(removed_from)
         else:
-            _remove_by_id(self.sections.get(src,[]))
+            removed_from = self.sections.get(src,[])
+            _remove_by_id(removed_from)
         # Duplicate check — warn if same slug already in target
         if target_cat not in self.sections: self.sections[target_cat]=[]
         existing_slugs = {x["slug"] for x in self.sections[target_cat]}
         if e["slug"] in existing_slugs:
-            # Ask user rather than silently deduplicating (Pi version deduped silently)
+            # Ask user rather than silently deduplicating (Pi version deduped silently).
+            # BUG FIX: e was already removed from its source list above (so the
+            # duplicate check above sees the post-removal state). If the user
+            # declines this dialog, e must go back to `removed_from`, or it's
+            # orphaned — gone from every list with no way to recover it short
+            # of reloading the file. confirm_skip_cb (B) restores it.
             self.confirm_msg = (f"'{ e['title'][:34]}' may already be in '{target_cat}'. Move anyway?")
-            def _do_move(entry=e, tcat=target_cat, src=src):
+            def _do_move(entry=e, tcat=target_cat):
                 self.sections[tcat].append(entry)
                 self.sel_entry=None
                 self._rebuild_all_flat()
                 self.status=f"Moved '{entry['title'][:36]}' → {tcat} (duplicate warning)"
                 self.status_ok=True
                 self.R.flush()
-            self.confirm_cb=_do_move; self.screen=S_CONFIRM
+            def _do_cancel_move(entry=e, restore_to=removed_from):
+                restore_to.append(entry)
+                self.sel_entry=None
+                self._rebuild_all_flat()
+                self.status=f"Move cancelled — '{entry['title'][:36]}' stayed put."
+                self.status_ok=True
+                self.R.flush()
+            self.confirm_cb=_do_move
+            self.confirm_skip_cb=_do_cancel_move
+            self.screen=S_CONFIRM
             return
         self.sections[target_cat].append(e)
         self.sel_entry=None; self.move_mode=False
@@ -1775,6 +2320,13 @@ class App:
                 self.status = f"'{new_name}' already exists — rename cancelled."
                 self.status_ok = False
                 return
+            if new_name == "UNSORTED":
+                # Same reserved-name hazard as Add category: this would
+                # overwrite self.sections["UNSORTED"], wiping real unsorted
+                # entries rather than creating a real category.
+                self.status = "'UNSORTED' is reserved — pick a different name."
+                self.status_ok = False
+                return
             # Update categories list
             try:
                 idx = self.categories.index(old_name)
@@ -1783,6 +2335,11 @@ class App:
                 pass
             # Rename sections key
             self.sections[new_name] = self.sections.pop(old_name, [])
+            # Keep the master record in sync NOW, not just at next save —
+            # otherwise a PICO-8 strip before the next save would recover
+            # entries back under the OLD category name (see Fix 9).
+            if self.filepath:
+                set_master_category_for_entries(self.filepath, self.sections[new_name], new_name)
             # Update live selection
             self.sel_cat = new_name
             self._rebuild_all_flat()
@@ -1815,6 +2372,14 @@ class App:
             self.sections.pop(c, None)
             if c in self.categories:
                 self.categories.remove(c)
+            # Keep the master record in sync NOW (Fix 9) — otherwise these
+            # slugs' stale master entries still say cat=c, and a PICO-8
+            # strip before the next save would resurrect the just-deleted
+            # category. Mark them UNSORTED instead of erasing their master
+            # history entirely, since reconcile already excludes UNSORTED
+            # records from its recovery map.
+            if self.filepath:
+                set_master_category_for_entries(self.filepath, ents, "UNSORTED")
             # Clear selection
             self.sel_cat   = None
             self.sel_entry = None
@@ -1832,32 +2397,58 @@ class App:
     # ── action menu ───────────────────────────────────────────────────────────
 
     def _open_action(self):
-        items=["Save file","Add category","Delete game","Filter all entries",
+        items=["Save file","Reload file (discard changes)","Add category",
+               "Delete game","Filter all entries",
                "Clear filter","Auto-sort unsorted","Fetch BBS tags",
-               "Suggest new categories"]
+               "Suggest new categories","Find duplicates",
+               "Export master list","Import master list"]
         # Context: category-specific items when a category is open
         if self.sel_cat:
             items += ["Rename category","Delete category"]
         items += ["Change file path","Quit","Cancel"]
-        self.act_items=items; self.act_idx=0; self.screen=S_ACTION
+        self.act_items=items; self.act_idx=0; self.act_scroll=0; self.screen=S_ACTION
+
+    def _action_visible_rows(self):
+        item_h = _sy(48)
+        mh = min(len(self.act_items)*item_h + _sy(60), SH-_sy(80))
+        return max(1, (mh - _sy(38)) // item_h)
 
     def _h_action(self, btn):
         if btn=="UP":   self.act_idx=(self.act_idx-1)%len(self.act_items)
         elif btn=="DOWN": self.act_idx=(self.act_idx+1)%len(self.act_items)
-        elif btn in ("A","RIGHT"): self._do_action(self.act_items[self.act_idx])
-        elif btn in ("B","X"):     self.screen=S_MAIN
+        elif btn in ("A","RIGHT"): self._do_action(self.act_items[self.act_idx]); return
+        elif btn in ("B","X"):     self.screen=S_MAIN; return
+        visible = self._action_visible_rows()
+        if self.act_idx < self.act_scroll:
+            self.act_scroll = self.act_idx
+        elif self.act_idx >= self.act_scroll + visible:
+            self.act_scroll = self.act_idx - visible + 1
 
     def _do_action(self, action):
         self.screen=S_MAIN
         if action=="Save file":
             self._save()
+        elif action=="Reload file (discard changes)":
+            self._reload_file()
         elif action=="Add category":
             self.kb=VKeyboard("New category name (will be uppercased):","")
             def _add(name):
                 name=name.strip().upper()
-                if name and name not in self.categories:
+                if not name:
+                    return
+                if name == "UNSORTED":
+                    # "UNSORTED" is a reserved internal bucket name, not a
+                    # real category — creating one here would silently wipe
+                    # self.sections["UNSORTED"] (the actual unsorted entries
+                    # bucket), losing real data.
+                    self.status = "'UNSORTED' is reserved — pick a different name."
+                    self.status_ok = False
+                    return
+                if name not in self.categories:
                     self.categories.append(name); self.sections[name]=[]
                     self.status=f"Category added: {name}"; self.status_ok=True
+                else:
+                    self.status = f"'{name}' already exists."; self.status_ok = False
             self._kb_cb=_add; self.screen=S_KEYBOARD
         elif action=="Delete game":
             if self.focus==F_RIGHT:
@@ -1892,6 +2483,29 @@ class App:
             self._start_autosort(use_bbs=True)
         elif action=="Suggest new categories":
             self._start_suggest()
+        elif action=="Find duplicates":
+            self._start_duplicate_review()
+        elif action=="Export master list":
+            default_dest = os.path.join(os.path.dirname(self.filepath), "favourites_master_export.json") \
+                           if self.filepath else "favourites_master_export.json"
+            self.kb = VKeyboard("Export master list to path:", default_dest)
+            def _do_export(dest):
+                ok, info = export_master_categories(self.filepath, dest)
+                if ok:
+                    self.status = f"Master list exported to {info}"; self.status_ok=True
+                else:
+                    self.status = f"Export failed: {info}"; self.status_ok=False
+            self._kb_cb = _do_export; self.screen = S_KEYBOARD
+        elif action=="Import master list":
+            self.kb = VKeyboard("Import master list from path:", "")
+            def _do_import(src):
+                try:
+                    added, updated = import_master_categories(self.filepath, src)
+                    self.status = f"Master list merged: {added} new, {updated} updated"
+                    self.status_ok = True
+                except Exception as e:
+                    self.status = f"Import failed: {e}"; self.status_ok = False
+            self._kb_cb = _do_import; self.screen = S_KEYBOARD
         elif action=="Rename category":
             self._rename_category()
         elif action=="Delete category":
@@ -1903,12 +2517,118 @@ class App:
             self.quit = True
         # Cancel does nothing
 
+    # ── duplicate review (scrollable overview screen) ───────────────────────────
+
+    def _start_duplicate_review(self):
+        groups = find_all_duplicate_groups(self.sections, self.unsorted)
+        if not groups:
+            self.status = "No likely duplicates found."; self.status_ok = True
+            return
+        self.dupes_groups = groups
+        self.dupes_idx = 0
+        self.dupes_scroll = 0
+        self.screen = S_DUPES
+
+    def _dupes_visible_rows(self):
+        # Must match the panel geometry used in _draw_dupes() exactly, or
+        # the handler's scroll math and the renderer's visible window can
+        # drift apart (the same class of bug just fixed in the action menu).
+        bh = SH - _sy(106)
+        card_h = _sy(56)
+        return max(2, (bh - _sy(34)) // card_h)
+
+    def _h_dupes(self, btn):
+        if not self.dupes_groups:
+            self.screen = S_MAIN; return
+        n = len(self.dupes_groups)
+        if btn=="UP":
+            self.dupes_idx=(self.dupes_idx-1)%n
+        elif btn=="DOWN":
+            self.dupes_idx=(self.dupes_idx+1)%n
+        elif btn in ("B","X"):
+            self.screen = S_MAIN; return
+        elif btn=="Y":
+            # Jump into ALL ENTRIES filtered on this group's title, for
+            # manual side-by-side review (useful for the author/title
+            # fuzzy matches that this screen won't auto-resolve).
+            _reason, ents = self.dupes_groups[self.dupes_idx]
+            self.browse_mode = True
+            self.all_filter  = ents[0]["title"]
+            self._rebuild_all_flat()
+            self.l_idx = self.l_scroll = 0
+            self.focus = F_LEFT
+            self.status = f"Filtered ALL ENTRIES by '{ents[0]['title'][:30]}' for manual review."
+            self.status_ok = True
+            self.screen = S_MAIN
+            return
+        elif btn=="A":
+            self._resolve_dupes_group(self.dupes_idx)
+            return
+        visible = self._dupes_visible_rows()
+        if self.dupes_idx < self.dupes_scroll:
+            self.dupes_scroll = self.dupes_idx
+        elif self.dupes_idx >= self.dupes_scroll + visible:
+            self.dupes_scroll = self.dupes_idx - visible + 1
+
+    def _resolve_dupes_group(self, idx):
+        if idx >= len(self.dupes_groups):
+            return
+        reason, ents = self.dupes_groups[idx]
+
+        if reason == "same author + title, different cart ID":
+            # No reliable "which is newer" signal across different cart IDs
+            # — don't guess. Point at the manual-review path instead.
+            self.status = "No reliable recency signal for this group — press Y to review it in ALL ENTRIES."
+            self.status_ok = True
+            return
+
+        keep = ents[0]   # base-ID groups are sorted newest-revision-first
+        drop = ents[1:]
+        names = ", ".join(f"'{e['title'][:24]}'" for e in drop)
+        self.confirm_msg = (
+            f"Keep '{keep['title'][:28]}', remove {len(drop)} older "
+            f"[{names}]? (B = keep both)")
+
+        def _do_keep_latest(idx=idx, keep=keep, drop=list(drop)):
+            self._remove_entries_by_identity(drop)
+            self._rebuild_all_flat()
+            if idx < len(self.dupes_groups):
+                del self.dupes_groups[idx]
+            self.dupes_idx = max(0, min(self.dupes_idx, len(self.dupes_groups)-1))
+            self.status = f"Kept '{keep['title'][:28]}', removed {len(drop)} duplicate(s)."
+            self.status_ok = True
+            self.screen = S_DUPES if self.dupes_groups else S_MAIN
+
+        def _do_keep_both(idx=idx):
+            if idx < len(self.dupes_groups):
+                del self.dupes_groups[idx]
+            self.dupes_idx = max(0, min(self.dupes_idx, len(self.dupes_groups)-1))
+            self.screen = S_DUPES if self.dupes_groups else S_MAIN
+
+        self.confirm_cb = _do_keep_latest
+        self.confirm_skip_cb = _do_keep_both
+        self.screen = S_CONFIRM
+
+    def _remove_entries_by_identity(self, entries_to_remove):
+        """Removes entries from unsorted + every category by object identity
+        (never by ==/slug), per the project's core duplicate-bug rule."""
+        targets = list(entries_to_remove)
+        for lst in [self.unsorted] + list(self.sections.values()):
+            for t in targets:
+                for i, e in enumerate(lst):
+                    if e is t:
+                        del lst[i]
+                        break
+
     def _h_confirm(self, btn):
         if btn=="A":
-            if self.confirm_cb: self.confirm_cb()
-            self.confirm_cb=None; self.screen=S_MAIN
+            cb=self.confirm_cb
+            self.confirm_cb=None; self.confirm_skip_cb=None; self.screen=S_MAIN
+            if cb: cb()
         elif btn in ("B","X"):
-            self.confirm_cb=None; self.screen=S_MAIN
+            skip=self.confirm_skip_cb
+            self.confirm_cb=None; self.confirm_skip_cb=None; self.screen=S_MAIN
+            if skip: skip()
 
     # ── hint text (context-aware) ─────────────────────────────────────────────
 
@@ -2296,15 +3016,8 @@ class App:
         pool = self._sg_get_pool()
 
         kw_sugs  = suggest_new_categories(pool, self.categories)
-        # Filter tag cache to entries in the current pool only — matches Pi
-        # _rebuild_cards behaviour. Without this, when scope is "unsorted" but
-        # the cache was built in "all" mode, categorised entries bleed into the
-        # unsorted suggestions.
-        pool_ids = {id(e) for e in pool}
-        filtered_cache = {eid: v for eid, v in self._sg_tag_cache.items()
-                          if eid in pool_ids}
-        bbs_sugs = (suggest_new_categories_from_tags(filtered_cache, self.categories)
-                    if filtered_cache else {})
+        bbs_sugs = (suggest_new_categories_from_tags(self._sg_tag_cache, self.categories)
+                    if self._sg_tag_cache else {})
 
         merged = dict(kw_sugs)
         for cat, ents in bbs_sugs.items():
@@ -2537,6 +3250,50 @@ class App:
 
     # ── draw: S_SUGGEST ───────────────────────────────────────────────────────
 
+    def _draw_dupes(self):
+        R = self.R
+        groups = self.dupes_groups
+        n = len(groups)
+
+        bx, by = _sx(10), _sy(48)
+        bw, bh = SW - _sx(20), SH - _sy(106)
+        R.fill(bx, by, bw, bh, PANEL)
+        R.box(bx, by, bw, bh, ACCENT)
+        R.text(f"Possible Duplicates  ({n} group{'s' if n!=1 else ''})",
+               bx+_sx(10), by+_sy(6), YELLOW, R.fbg)
+        R.hline(bx, by+_sy(28), bw, DIM)
+
+        if not n:
+            R.text("No duplicates remaining.", bx+_sx(10), by+_sy(44), DIM, R.fmd)
+        else:
+            card_h = _sy(56)
+            vis    = self._dupes_visible_rows()
+            list_y = by + _sy(32)
+            for i in range(vis):
+                gi = self.dupes_scroll + i
+                if gi >= n:
+                    break
+                reason, ents = groups[gi]
+                ry  = list_y + i * card_h
+                sel = (gi == self.dupes_idx)
+                if sel:
+                    R.fill(bx+_sx(4), ry, bw-_sx(8), card_h-_sy(2), SEL_BG)
+                R.box(bx+_sx(4), ry, bw-_sx(8), card_h-_sy(2), ACCENT if sel else DIM)
+                reason_col = TEAL if reason=="same author + title, different cart ID" else YELLOW
+                R.text(reason, bx+_sx(12), ry+_sy(4), reason_col, R.fsm)
+                names = "  /  ".join(e["title"][:22] for e in ents[:4])
+                if len(ents) > 4:
+                    names += f"  (+{len(ents)-4} more)"
+                R.text_clip(names, bx+_sx(12), ry+_sy(26), bw-_sx(32), WHITE, R.fmd)
+
+            if self.dupes_scroll > 0:
+                R.text("▲", bx+bw-_sx(28), list_y+_sy(2), ACCENT, R.fsm)
+            if self.dupes_scroll+vis < n:
+                R.text("▼", bx+bw-_sx(28), by+bh-_sy(30), ACCENT, R.fsm)
+
+        R.text("A=Resolve  Y=Review in ALL ENTRIES  B=Close",
+               bx+_sx(10), by+bh-_sy(20), DIM, R.fsm)
+
     def _draw_suggest(self):
         R = self.R
         cards = self._sg_cards
@@ -2684,6 +3441,9 @@ class App:
         elif self.screen==S_SUGGEST:
             self._draw_main_bg()
             self._draw_suggest()
+        elif self.screen==S_DUPES:
+            self._draw_main_bg()
+            self._draw_dupes()
         elif self.screen==S_AUTOSORT:
             self._draw_main_bg()
             self._draw_autosort()
@@ -2805,7 +3565,7 @@ class App:
                 R.text_clip(e["title"],x+_sx(7),ry+_sy(2),title_maxw,tc,R.fbd)
             R.text_clip(e["author"],x+_sx(7),ry+_sy(24),w-_sx(14),DIM,R.fsm)
             if bm and cat:
-                R.text_clip(cat,x+_sx(7),ry+_sy(40),w-_sx(14),TEAL,R.fsm)
+                R.text_clip(cat,x+_sx(7),ry+_sy(35),w-_sx(14),TEAL,R.fsm)
 
         # scrollbar
         if n>vis:
@@ -2894,8 +3654,9 @@ class App:
     def _draw_action(self):
         R=self.R
         # FIX(menu-overflow): cap height so adding items never pushes menu off-screen.
-        # FIX(menu-clip): guard the render loop so items beyond the capped box
-        # boundary are not drawn outside the panel.
+        # FIX(menu-scroll): when the item count exceeds the visible capacity,
+        # scroll the list (act_scroll, kept in sync by _h_action) instead of
+        # silently clipping items like "Quit"/"Cancel" off-screen and unreachable.
         item_h=_sy(48); item_sel_h=_sy(44)
         mw=_sx(400)
         mh=min(len(self.act_items)*item_h+_sy(60), SH-_sy(80))
@@ -2904,13 +3665,20 @@ class App:
         R.box(mx,my,mw,mh,ACCENT)
         R.text("ACTION MENU",mx+_sx(12),my+_sy(8),ACCENT,R.fbg)
         R.hline(mx,my+_sy(32),mw,DIM)
-        for i,item in enumerate(self.act_items):
-            iy=my+_sy(38)+i*item_h
+        visible = self._action_visible_rows()
+        window = self.act_items[self.act_scroll:self.act_scroll+visible]
+        for row,item in enumerate(window):
+            i = self.act_scroll + row
+            iy=my+_sy(38)+row*item_h
             if iy+item_sel_h > my+mh: break
             if i==self.act_idx:
                 R.fill(mx+_sx(4),iy,mw-_sx(8),item_sel_h,SEL_BG)
                 R.box(mx+_sx(4),iy,mw-_sx(8),item_sel_h,ACCENT)
             R.text(item,mx+_sx(16),iy+_sy(12),WHITE if i==self.act_idx else DIM,R.fmd)
+        if self.act_scroll > 0:
+            R.text("▲",mx+mw-_sx(24),my+_sy(36),ACCENT,R.fsm)
+        if self.act_scroll+visible < len(self.act_items):
+            R.text("▼",mx+mw-_sx(24),my+mh-_sy(40),ACCENT,R.fsm)
         R.text("↑↓=Move  A=Select  B=Close",mx+_sx(12),my+mh-_sy(22),DIM,R.fsm)
 
     def _draw_confirm(self):

@@ -1,10 +1,39 @@
 #!/usr/bin/env python3
 # =============================================================================
-# PICO-8 Favourites Sorter — muOS Edition  v1.7.10
+# PICO-8 Favourites Sorter — muOS Edition  v1.7.11
 # For: Anbernic RG Cube XX (720×720) running MustardOS
 # Pure Python 3 + SDL2 via ctypes. No pip, no extras needed.
 #
 # Changelog:
+#   v1.7.11 (2026-06-30) — Genre coverage: 5 deferred categories added.
+#                                 Added HORROR / STEALTH, RHYTHM,
+#                                 METROIDVANIA, CARD / BOARD / STRATEGY,
+#                                 and IDLE / CLICKER to DEFAULT_CATS and
+#                                 AUTO_SORT_RULES, inserted right before
+#                                 CLOCKS / UTILITIES / TOYS (same pattern
+#                                 used for SPORTS/PINBALL and SIM/TYCOON in
+#                                 an earlier session) so existing keyword
+#                                 priority is unaffected — e.g. RACING's
+#                                 "beat" (beat-em-up) still wins over the
+#                                 new RHYTHM category, since RHYTHM
+#                                 deliberately avoids "beat" as a keyword
+#                                 to prevent collision. METROIDVANIA kept
+#                                 narrow (just "metroidvania"/"vania") so
+#                                 it doesn't steal ordinary platformer
+#                                 matches via "explore" etc. Also updated
+#                                 TAG_TO_CAT (used for BBS-tag-based
+#                                 suggestions): "metroidvania" tag now maps
+#                                 to METROIDVANIA instead of PLATFORMERS;
+#                                 "horror" tag now maps to HORROR/STEALTH
+#                                 instead of ATMOSPHERIC; "rhythm" tag now
+#                                 maps to RHYTHM instead of MUSIC/DEMOSCENE;
+#                                 added "stealth"/"dance"/"card"/"board"/
+#                                 "chess"/"tabletop"/"idle"/"clicker"/
+#                                 "incremental" tags. Existing categorized
+#                                 entries in favourites.txt are NOT
+#                                 retroactively re-sorted — this only
+#                                 affects auto-suggest behavior for newly
+#                                 added/uncategorized entries going forward.
 #   v1.7.10 (2026-06-30) — Fix 12: missing `import time` — NameError crash.
 #                                 `import time` was absent from the top-level
 #                                 import line entirely, while time.monotonic()
@@ -665,6 +694,13 @@ DEFAULT_CATS = [
     "PLATFORMERS / ADVENTURE",
     "ATMOSPHERIC / WALKING SIMS / NARRATIVE",
     "MUSIC / DEMOSCENE",
+    "SPORTS / PINBALL",
+    "SIM / TYCOON / SANDBOX",
+    "HORROR / STEALTH",
+    "RHYTHM",
+    "METROIDVANIA",
+    "CARD / BOARD / STRATEGY",
+    "IDLE / CLICKER",
     "CLOCKS / UTILITIES / TOYS",
 ]
 
@@ -702,7 +738,7 @@ TAG_TO_CAT = {
     "platform":         "PLATFORMERS / ADVENTURE",
     "adventure":        "PLATFORMERS / ADVENTURE",
     "exploration":      "PLATFORMERS / ADVENTURE",
-    "metroidvania":     "PLATFORMERS / ADVENTURE",
+    "metroidvania":     "METROIDVANIA",
     "run-and-gun":      "PLATFORMERS / ADVENTURE",
     "runner":           "PLATFORMERS / ADVENTURE",
     "narrative":        "ATMOSPHERIC / WALKING SIMS / NARRATIVE",
@@ -710,14 +746,23 @@ TAG_TO_CAT = {
     "visual-novel":     "ATMOSPHERIC / WALKING SIMS / NARRATIVE",
     "walking-sim":      "ATMOSPHERIC / WALKING SIMS / NARRATIVE",
     "atmospheric":      "ATMOSPHERIC / WALKING SIMS / NARRATIVE",
-    "horror":           "ATMOSPHERIC / WALKING SIMS / NARRATIVE",
+    "horror":           "HORROR / STEALTH",
+    "stealth":          "HORROR / STEALTH",
     "art":              "ATMOSPHERIC / WALKING SIMS / NARRATIVE",
     "music":            "MUSIC / DEMOSCENE",
-    "rhythm":           "MUSIC / DEMOSCENE",
+    "rhythm":           "RHYTHM",
+    "dance":            "RHYTHM",
     "demoscene":        "MUSIC / DEMOSCENE",
     "demo":             "MUSIC / DEMOSCENE",
     "chiptune":         "MUSIC / DEMOSCENE",
     "audio":            "MUSIC / DEMOSCENE",
+    "card":             "CARD / BOARD / STRATEGY",
+    "board":            "CARD / BOARD / STRATEGY",
+    "chess":            "CARD / BOARD / STRATEGY",
+    "tabletop":         "CARD / BOARD / STRATEGY",
+    "idle":             "IDLE / CLICKER",
+    "clicker":          "IDLE / CLICKER",
+    "incremental":      "IDLE / CLICKER",
     "tool":             "CLOCKS / UTILITIES / TOYS",
     "utility":          "CLOCKS / UTILITIES / TOYS",
     "toy":              "CLOCKS / UTILITIES / TOYS",
@@ -765,9 +810,41 @@ AUTO_SORT_RULES = [
                     "sound","demo","chip","tracker","melody","jukebox","radio","concert"],
         "authors": [],
     }),
+    ("SPORTS / PINBALL", {
+        "titles":  ["pinball","tennis","golf","soccer","football","basketball",
+                    "baseball","bowling","hockey","ball","sport"],
+        "authors": [],
+    }),
+    ("SIM / TYCOON / SANDBOX", {
+        "titles":  ["tycoon","theme","craft","city","manage",
+                    "delivery","trade","mining","factory","colony"],
+        "authors": [],
+    }),
+    ("HORROR / STEALTH", {
+        "titles":  ["horror","scary","fear","creepy","stealth","sneak",
+                    "nightmare","haunt","ghost","zombie","slasher","dread"],
+        "authors": [],
+    }),
+    ("RHYTHM", {
+        "titles":  ["rhythm","dance","groove","metronome","tapbeat","disco"],
+        "authors": [],
+    }),
+    ("METROIDVANIA", {
+        "titles":  ["metroidvania","vania"],
+        "authors": [],
+    }),
+    ("CARD / BOARD / STRATEGY", {
+        "titles":  ["card","poker","solitaire","chess","checkers","board",
+                    "dice","tabletop","deck"],
+        "authors": [],
+    }),
+    ("IDLE / CLICKER", {
+        "titles":  ["idle","clicker","incremental","afk","autoclick"],
+        "authors": [],
+    }),
     ("CLOCKS / UTILITIES / TOYS", {
         "titles":  ["clock","watch","timer","util","tool","toy",
-                    "sandbox","screensaver","paint","draw","sketch","generator","test"],
+                    "screensaver","paint","draw","sketch","generator","test"],
         "authors": [],
     }),
 ]

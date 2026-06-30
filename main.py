@@ -1,10 +1,18 @@
 #!/usr/bin/env python3
 # =============================================================================
-# PICO-8 Favourites Sorter — muOS Edition  v1.7.3
+# PICO-8 Favourites Sorter — muOS Edition  v1.7.4
 # For: Anbernic RG Cube XX (720×720) running MustardOS
 # Pure Python 3 + SDL2 via ctypes. No pip, no extras needed.
 #
 # Changelog:
+#   v1.7.4 (2026-06-29) — Fix ZZ: v1.7.3's new duplicate-removal code used
+#                                 list.remove(e), which matches by value
+#                                 (dict equality) not identity. Two entries
+#                                 with identical field values (a genuinely
+#                                 duplicated raw line) could cause the wrong
+#                                 object to be removed. Violates the project's
+#                                 identity-removal rule. Rewrote as a single
+#                                 identity-based filter pass — no .remove().
 #   v1.7.3 (2026-06-29) — Sync YY: Pi version comparison audit.
 #                                 Bug A: write_file unsorted order reversed vs
 #                                   Pi. Pi writes raw unsorted (newest, prepend
@@ -1317,13 +1325,19 @@ class App:
         # Duplicate slug detection — matches Pi version auto-remove logic.
         # First occurrence in file order wins; duplicates are silently dropped.
         # Reported in status so user knows the file was cleaned.
+        # Identity-based filtering throughout — never list.remove(e), which
+        # matches by value and can remove the wrong object when two entries
+        # have identical field values (a genuinely duplicated raw line).
         _seen_slugs = {}
         _dup_count  = 0
-        for e in list(uns):
+        _uns_keep = []
+        for e in uns:
             if e["slug"] in _seen_slugs:
-                uns.remove(e); _dup_count += 1
+                _dup_count += 1
             else:
                 _seen_slugs[e["slug"]] = e
+                _uns_keep.append(e)
+        uns = _uns_keep
         for _cat, _ents in sec.items():
             _keep = []
             for e in _ents:

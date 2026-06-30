@@ -1,10 +1,28 @@
 #!/usr/bin/env python3
 # =============================================================================
-# PICO-8 Favourites Sorter — muOS Edition  v1.7.4
+# PICO-8 Favourites Sorter — muOS Edition  v1.7.6
 # For: Anbernic RG Cube XX (720×720) running MustardOS
 # Pure Python 3 + SDL2 via ctypes. No pip, no extras needed.
 #
 # Changelog:
+#   v1.7.6 (2026-06-29) — Fix BB: write_file kept a rotating set of up to 3
+#                                 timestamped backups (favourites.txt.bak_*)
+#                                 instead of the single overwriting .bak file
+#                                 the Pi version uses — caused duplicate
+#                                 backups to accumulate on the SD card.
+#                                 Reverted to single .bak (overwritten each
+#                                 save), matching Pi version exactly. Old
+#                                 rotating .bak_* files from v1.7.4 and
+#                                 earlier are cleaned up automatically on
+#                                 next save. Unused `datetime` import removed.
+#   v1.7.5 (2026-06-29) — Fix AA: Left panel ALL ENTRIES browse mode — category
+#                                 line (3rd line of each row) sat too close to
+#                                 the author line, causing visual overlap.
+#                                 Author->category gap was 11px (_sy(24) to
+#                                 _sy(35)) vs the title->author gap of 22px.
+#                                 Category line moved from _sy(35) to _sy(40),
+#                                 widening the gap to 16px. Row height (_sy(54))
+#                                 has headroom for the shift.
 #   v1.7.4 (2026-06-29) — Fix ZZ: v1.7.3's new duplicate-removal code used
 #                                 list.remove(e), which matches by value
 #                                 (dict equality) not identity. Two entries
@@ -303,7 +321,6 @@
 
 import ctypes, ctypes.util, os, re, shutil, sys, threading, queue, time
 import urllib.request
-from datetime import datetime
 
 # =============================================================================
 # SDL2 bootstrap
@@ -1079,20 +1096,27 @@ def parse_file(path):
     return sections, cat_order, unsorted
 
 def write_file(path, categories, sections, unsorted):
-    # FIX(bug4): rotate timestamped backups — keep only last 3 so the SD
-    # card is not silently filled after many saves.
-    ts_bak = path + ".bak_" + datetime.now().strftime("%Y%m%d_%H%M%S")
-    shutil.copy2(path, ts_bak)
-    bak_dir  = os.path.dirname(os.path.abspath(path))
-    bak_base = os.path.basename(path) + ".bak_"
-    existing = sorted(
-        f for f in os.listdir(bak_dir) if f.startswith(bak_base)
-    )
-    while len(existing) > 3:
-        try:
-            os.remove(os.path.join(bak_dir, existing.pop(0)))
-        except OSError:
-            pass
+    # Single .bak file — overwritten on every save. Matches Pi version
+    # behaviour exactly (one backup, not a rotating set).
+    backup = path + ".bak"
+    if os.path.exists(backup):
+        os.remove(backup)
+    shutil.copy2(path, backup)
+
+    # One-time cleanup: remove leftover rotating timestamped backups from
+    # v1.7.4 and earlier (favourites.txt.bak_YYYYMMDD_HHMMSS) so old installs
+    # don't accumulate orphaned files forever.
+    try:
+        bak_dir  = os.path.dirname(os.path.abspath(path))
+        bak_base = os.path.basename(path) + ".bak_"
+        for f in os.listdir(bak_dir):
+            if f.startswith(bak_base):
+                try:
+                    os.remove(os.path.join(bak_dir, f))
+                except OSError:
+                    pass
+    except OSError:
+        pass
 
     out = []
     # FIX(unsorted-header): unsorted entries must be written FIRST with no
@@ -1118,7 +1142,7 @@ def write_file(path, categories, sections, unsorted):
     with open(tmp, "w", encoding="utf-8") as _wf:
         _wf.write("\n".join(out))
     os.replace(tmp, path)
-    return ts_bak
+    return backup
 # =============================================================================
 # Virtual keyboard  (grid, controller-navigable)
 # =============================================================================
@@ -2781,7 +2805,7 @@ class App:
                 R.text_clip(e["title"],x+_sx(7),ry+_sy(2),title_maxw,tc,R.fbd)
             R.text_clip(e["author"],x+_sx(7),ry+_sy(24),w-_sx(14),DIM,R.fsm)
             if bm and cat:
-                R.text_clip(cat,x+_sx(7),ry+_sy(35),w-_sx(14),TEAL,R.fsm)
+                R.text_clip(cat,x+_sx(7),ry+_sy(40),w-_sx(14),TEAL,R.fsm)
 
         # scrollbar
         if n>vis:

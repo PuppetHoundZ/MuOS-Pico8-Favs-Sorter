@@ -1,10 +1,51 @@
 #!/usr/bin/env python3
 # =============================================================================
-# PICO-8 Favourites Sorter — muOS Edition  v1.7.8
+# PICO-8 Favourites Sorter — muOS Edition  v1.7.9
 # For: Anbernic RG Cube XX (720×720) running MustardOS
 # Pure Python 3 + SDL2 via ctypes. No pip, no extras needed.
 #
 # Changelog:
+#   v1.7.9 (2026-06-30) — Fix 11: silent boot-crash blind spot.
+#                                 main()'s startup sequence (SDL_Init ->
+#                                 SDL_CreateWindow -> SDL_CreateRenderer ->
+#                                 Renderer() -> App()) had ZERO exception
+#                                 handling and zero logging — every other
+#                                 code path (fire()/draw() in the main loop)
+#                                 writes failures to
+#                                 /tmp/pico8sorter_crash.log, but a failure
+#                                 during startup itself just died with a
+#                                 Python traceback to stderr, which muOS has
+#                                 nowhere to show and nowhere to save. This
+#                                 is the most likely explanation for "app
+#                                 still doesn't boot" with no diagnostic
+#                                 trail to go on. Extracted startup into
+#                                 _boot(), wrapped end-to-end: SDL_Init,
+#                                 SDL_CreateWindow, and SDL_CreateRenderer
+#                                 failures now check their return value
+#                                 (previously unchecked — a NULL window
+#                                 would silently propagate into
+#                                 CreateRenderer and crash deeper with no
+#                                 hint of the real cause) and log
+#                                 SDL_GetError() before exiting; Renderer()
+#                                 and App() init failures are caught and
+#                                 logged with full traceback before
+#                                 re-raising. Also set SDL_GetError's ctypes
+#                                 restype to c_char_p (was unset/default
+#                                 int, which truncates the returned char*
+#                                 pointer — would itself segfault or return
+#                                 garbage on a 64-bit build). Also widened
+#                                 _load()'s try/except to cover
+#                                 reconcile_stripped_categories() (Fix 6/7),
+#                                 which previously ran unguarded on every
+#                                 auto-load — defense in depth even though
+#                                 load_master_categories()/
+#                                 find_backups_newest_first() already catch
+#                                 their own errors internally.
+#                                 NEXT TIME IT FAILS TO BOOT: check
+#                                 /tmp/pico8sorter_crash.log first — it will
+#                                 now contain the real cause instead of
+#                                 nothing.
+#
 #   v1.7.8 (2026-06-30) — Fix 10: category-move data loss + Reload feature.
 #                                 BUG FOUND (serious): _assign() removed the
 #                                 entry from its source list BEFORE showing
@@ -178,297 +219,56 @@
 #                                 New menu items (X menu): "Find duplicates"
 #                                 walks a queued confirm-dialog per group —
 #                                 A = keep newest revision / remove the rest,
-#                                 B = keep all and move to the next group.
-#                                 Author/title fuzzy matches are surfaced as
-#                                 info-only (no guessed deletion, since cross-
-#                                 cart-ID recency isn't reliably knowable) —
-#                                 review those manually via ALL ENTRIES.
-#                                 "Export master list" / "Import master
-#                                 list" added alongside it. Removal uses
-#                                 identity-based matching (`is`, never `==`),
-#                                 per the project's core dedup-safety rule.
-#                                 Also fixed a latent S_CONFIRM bug while
-#                                 here: confirm_cb was invoked AFTER
-#                                 self.screen was forced back to S_MAIN,
-#                                 so a callback that re-opened S_CONFIRM
-#                                 (needed for the duplicate-review queue)
-#                                 would get silently stomped back to
-#                                 S_MAIN. Reordered so state resets first,
-#                                 then the callback runs and can re-chain.
-#   v1.7.3 (2026-06-30) — Fix 7: persistent master-category JSON + dup aid.
-#                                 New favourites.txt.master.json sits beside
-#                                 favourites.txt: append-only slug->category
-#                                 record, upserted on every save via
-#                                 update_master_categories(). Never rotated,
-#                                 never touched by PICO-8 — survives across
-#                                 the whole project history, not just the
-#                                 last 3 backups.
-#                                 reconcile_stripped_categories() (Fix 6) now
-#                                 prefers the master record, falling back to
-#                                 .bak_* scan only for slugs the master
-#                                 doesn't know yet (e.g. first run).
-#                                 New: prune_master_categories(path,
-#                                 keep_days) — cleanup tool to drop master
-#                                 entries not seen in N days, callable any
-#                                 time without touching favourites.txt.
-#                                 New: find_duplicate_groups() — groups
-#                                 entries by BBS base/cart ID (revision-
-#                                 suffix aware) as a review aid. Deliberately
-#                                 NOT auto-deleting: -N suffixes are often
-#                                 legitimate PICO-8 revisions, not dupes.
-#                                 UI wiring (menu entries for prune/dedupe
-#                                 review) is the next step, not yet added.
-#   v1.7.2 (2026-06-29) — Fix 6: recover categories PICO-8 strips on save.
-#                                 When PICO-8/Splore itself writes a new
-#                                 favourite to favourites.txt, it rewrites
-#                                 the file and drops all our "# === CAT ==="
-#                                 headers while preserving entry order.
-#                                 On load, if the file has zero headers but
-#                                 the newest .bak_* backup has categories,
-#                                 rebuild a slug->category map from that
-#                                 backup and re-assign current entries by
-#                                 slug (not position). Entries not found in
-#                                 the map (genuinely new PICO-8 favourites)
-#                                 stay unsorted. Guarded by a 30% overlap
-#                                 threshold so an unrelated/stale backup
-#                                 can't mis-categorise a real flat file.
-#                                 Nothing is written to disk until the user
-#                                 explicitly saves (START) — load remains
-#                                 read-only on disk. New: find_latest_backup(),
-#                                 reconcile_stripped_categories().
-#   v1.7.1 (2026-06-29) — Feature WW: Rename category, Delete category,
-#                                 duplicate detection on assign.
-#                                 Rename: X menu (when cat open) -> Rename
-#                                   category -> VKeyboard pre-filled with
-#                                   current name. Validates: non-empty, not
-#                                   already existing. Updates categories[],
-#                                   sections key, sel_cat live.
-#                                 Delete: X menu -> Delete category ->
-#                                   confirm dialog. On confirm: entries sorted
-#                                   author A->Z (Pi version rule), prepended
-#                                   to self.unsorted. sel_cat cleared, focus
-#                                   returned to cats panel.
-#                                 Duplicate detection: _assign() now checks
-#                                   if slug already in target category. If so,
-#                                   shows confirm dialog 'may already be here'
-#                                   rather than silently moving (Pi deduped
-#                                   silently; we warn instead).
-#                                 Action menu is now context-aware: Rename
-#                                   category and Delete category only appear
-#                                   when sel_cat is set.
-#   v1.7.0 (2026-06-29) — Feature VV: Suggest New Categories.
-#                                 Ports Pi version _on_suggest_categories
-#                                 to controller-native muOS design.
-#                                 Data: TAG_TO_NEW_CAT, KEYWORD_TO_NEW_CAT,
-#                                   MIN_SUGGEST=3, suggest_new_categories(),
-#                                   suggest_new_categories_from_tags().
-#                                 Screens: S_SUGGEST (card list), S_SGFETCH
-#                                   (BBS fetch progress for suggest).
-#                                 Controls on S_SUGGEST:
-#                                   A = toggle card selected/deselected
-#                                   X = rename card via VKeyboard
-#                                   Y = toggle scope (Unsorted / All)
-#                                   L2 = start BBS fetch (S_SGFETCH)
-#                                   L1/R1 = page up/down
-#                                   START = apply + create categories
-#                                   B = cancel
-#                                 Apply: creates categories, moves entries
-#                                   by identity, rebuilds flat list.
-#                                 BBS fetch: own queue (_sg_bbs_q), tag
-#                                   cache (_sg_tag_cache), scaled watchdog,
-#                                   drains per frame from draw().
-#                                 Marquee on selected card name.
-#   v1.6.4 (2026-06-29) — Sync UU: Ported fixes from stable Pi version.
-#                                 Fix 1: parse_entry now includes 'base'
-#                                   field (parts[2]) — the BBS cart ID.
-#                                   This was the root crash cause: BBS
-#                                   _worker used e['base'] which didn't
-#                                   exist. Title fallback also uses base.
-#                                 Fix 2: AUTO_SORT_RULES changed to dict
-#                                   format {titles:[...], authors:[]}
-#                                   matching Pi version structure.
-#                                 Fix 3: auto_suggest_category now checks
-#                                   author keywords as well as title,
-#                                   matching Pi version behaviour.
-#                                 Fix 4: BBS watchdog scaled to pool size
-#                                   max(30, total*2+10)s — Pi version.
-#                                 Fix 5: e['base'] restored in BBS worker
-#                                   now that base field exists in entries.
-#   v1.6.3 (2026-06-29) — Fix TT: Crash logging added. draw() and handle()
-#                                 wrapped in try/except. Any exception is
-#                                 logged to /tmp/pico8sorter_crash.log with
-#                                 full traceback. App recovers to S_MAIN
-#                                 instead of dying silently. Also fixed
-#                                 e["base"] KeyError in BBS _worker — field
-#                                 does not exist; replaced with e["slug"]
-#                                 which is the PICO-8 cart ID used as BBS pid.
-#   v1.6.2 (2026-06-29) — Fix SS: check_network() incorrectly blocked BBS
-#                                 fetch when WiFi was working. Many Anbernic
-#                                 WiFi drivers report operstate='unknown' even
-#                                 when fully connected (RFC 2863 not impl).
-#                                 Fix: muOS device config file is now checked
-#                                 first (written by muOS network daemon, most
-#                                 reliable). sysfs fallback now only treats
-#                                 explicit 'down'/'notpresent'/'lowerlayerdown'
-#                                 as offline — 'unknown'/'dormant' pass through
-#                                 and let the fetch attempt naturally.
-#   v1.6.1 (2026-06-29) — Fix RR: BBS fetch crashed the app.
-#                                 check_network() was blocking the SDL main
-#                                 thread for up to 2s doing a real HTTP HEAD
-#                                 request. muOS foreground watchdog kills apps
-#                                 that stop processing SDL events. Removed the
-#                                 pre-flight check entirely — fetch_bbs_tags()
-#                                 already catches all network errors per entry
-#                                 and returns [] so a dead connection completes
-#                                 gracefully with zero results. _bbs_finish now
-#                                 shows a WiFi toast when _bbs_done==0.
-#   v1.6.0 (2026-06-29) — Feature QQ: Marquee scroll for long text.
-#                                 Highlighted game titles (left+right panels)
-#                                 and category names (cats panel) scroll left
-#                                 when text overflows the column width.
-#                                 Timeline: 1s pause -> scroll at 60px/s ->
-#                                 1s pause -> reset -> repeat. Implemented via
-#                                 Renderer.text_marquee() which slices the SDL
-#                                 texture source rect by scroll offset — no
-#                                 clip rect or extra surfaces needed. State:
-#                                 _mq_key tracks (panel,idx); _mq_start is
-#                                 reset on key change or panel switch.
-#                                 Non-overflowing text uses text_clip as before.
-#   v1.5.6 (2026-06-29) — UI PP: Left panel header stacked.
-#                                 Mode label ([ NEW/UNSORTED ] / [ ALL ENTRIES ])
-#                                 now takes full width on line 1. Count badge
-#                                 and sort indicator share line 2 beneath it —
-#                                 count left-aligned, sort right-aligned.
-#                                 LIST_Y non-browse adjusted to _sy(38).
-#   v1.5.5 (2026-06-29) — Fix OO: Auto-sort crash on entry selection.
-#                                 _draw_autosort passed hex int 0x1A1A3A to
-#                                 R.fill() instead of an RGBA tuple. _sc()
-#                                 does SDL_SetRenderDrawColor(*col) which
-#                                 unpacks the colour — unpacking an int raises
-#                                 TypeError, crashing immediately when the
-#                                 cursor landed on any row. Fixed: replaced
-#                                 with SEL_BG. Also fixed toast background
-#                                 0x1A0A0A -> (26,10,10,255).
-#   v1.5.4 (2026-06-29) — Fix NN: Bold font (fbd) is taller than the old
-#                                 fsm it replaced, causing overlaps in four
-#                                 places after v1.5.3:
-#                                 Bug B: title/author overlap in left panel
-#                                   (both modes) — author shifted to _sy(24).
-#                                 Bug D: browse mode fbd header overlapping
-#                                   sort indicator — sort moved to _sy(28),
-#                                   LIST_Y browse to _sy(44).
-#                                 Bug E: non-browse list start too close to
-#                                   fbd header — LIST_Y moved to _sy(30).
-#                                 Bug F: right panel and cats panel rows
-#                                   starting at _sy(28) with 0-1px gap after
-#                                   fbd header — rows moved to _sy(30).
-#                                 Note: keyboard prompt changed from flg to
-#                                   fbd (saves vertical space in dialog).
-#   v1.5.3 (2026-06-29) — Polish MM: Bold font for titles and headers.
-#                                 BOLD_FONT_PATHS added — tries BPreplayBold.otf
-#                                 (muOS system font), DejaVuSans-Bold, Liberation
-#                                 Sans-Bold in order. Falls back to regular font
-#                                 if none found. Renderer gains fbd (bold medium)
-#                                 and fbg (bold large). Used for: game titles in
-#                                 all three panels, category names, panel headers,
-#                                 screen titles, action/confirm dialog headings,
-#                                 autosort suggestion titles.
-#   v1.5.2 (2026-06-29) — Polish LL: Contrast/readability pass on all colours.
-#                                 BG darker (17->10) for more panel separation.
-#                                 DIM massively increased (80->160) — was near-
-#                                 invisible on dark panels; now clearly readable.
-#                                 TEAL brightened (74->100) for author text.
-#                                 RED brightened (180->255) for errors/confirm.
-#                                 PURPLE brightened for active category highlight.
-#                                 ACCENT, YELLOW, WHITE, GREEN all lifted slightly.
-#   v1.5.1 (2026-06-29) — Fix KK: _as_scroll() hardcoded vis=8 did not
-#                                 match _draw_autosort's scaled vis formula.
-#                                 On 480p devices (SH=480) draw shows ~5 rows
-#                                 but scroll assumed 8 — cursor could sit on
-#                                 rows that were never rendered. Fixed: both
-#                                 _as_scroll and L1/R1 page-jump now compute
-#                                 vis = max(4,(bh-_sy(40))//max(1,_sy(54)))
-#                                 matching _draw_autosort exactly.
-#   v1.5.0 (2026-06-29) — Port JJ: Multi-device support.
-#                                 load_sdl_map() reads /opt/muos/device/config/
-#                                 board/sdl_map at startup and populates all
-#                                 JOY_* constants from the CSV. Falls back to
-#                                 CubeXX-H defaults silently. Covers the two
-#                                 L2/R2 variants across all 10 muOS devices.
-#                                 detect_screen_size() reads screen/internal/
-#                                 width+height from muOS device config; falls
-#                                 back to SDL_GetCurrentDisplayMode post-init,
-#                                 then 720x720. _SX/_SY scale factors drive
-#                                 _sx()/_sy() helpers used throughout all draw
-#                                 methods. Font sizes, panel coords, row heights,
-#                                 VISIBLE counts, keyboard, action/confirm
-#                                 dialogs, BBS fetch overlay, autosort list,
-#                                 toast, and scrollbars all scale automatically.
-#   v1.4.2 (2026-06-29) — Fix II: No-WiFi toast notification. check_network()
-#                                 probes lexaloffle.com with a 2s HEAD request
-#                                 before launching the BBS fetch thread. On
-#                                 failure a red toast overlay appears at the
-#                                 bottom of the screen for 4 seconds with the
-#                                 reason (no network / timeout / error). If
-#                                 keyword suggestions exist they are shown
-#                                 instead; otherwise the status bar shows the
-#                                 error. Toast system added to _draw_main_bg
-#                                 and auto-clears on expiry.
-#   v1.4.1 (2026-06-29) — Fix HH: Bug A: S_BBSFETCH never auto-transitioned to
-#                                 S_AUTOSORT. draw() drained the 'done' queue msg
-#                                 but ignored the return value; _h_bbsfetch then
-#                                 drained an empty queue and saw done=False.
-#                                 Fix: screen transition moved into _drain_bbs_queue
-#                                 via new _bbs_finish() helper. _h_bbsfetch
-#                                 simplified to B=cancel only.
-#                                 Bug C: sel_entry not cleared after auto-sort
-#                                 assign — right panel showed stale data. Fixed
-#                                 in _as_apply_one and _as_apply_all.
-#                                 Bug D: L1/R1 page-jump not handled in S_AUTOSORT.
-#                                 Added L/R page by 8 in _h_autosort; hint updated.
-#   v1.4.0 (2026-06-26) — Port GG: Auto-sort and BBS tag fetch ported from Pi version.
-#                                 AUTO_SORT_RULES: keyword match against title
-#                                 assigns unsorted entries to categories instantly.
-#                                 TAG_TO_CAT: 60+ BBS genre tags mapped to cats.
-#                                 Fetch BBS Tags: daemon thread with ThreadPoolExecutor
-#                                 (max 3 workers) fetches lexaloffle.com/bbs/?pid=<base>
-#                                 per entry; results drain into SDL main loop via
-#                                 queue.Queue() each frame -- no GLib, no crash risk.
-#                                 30-entry watchdog prevents permanent hang.
-#                                 S_AUTOSORT screen: scrollable suggestion list,
-#                                 A=assign one, B=skip, X=apply all, START=done.
-#                                 S_BBSFETCH screen: live progress bar, B=cancel.
-#                                 No browser feature omitted (no browser on muOS).
-#   v1.3.2 (2026-06-26) — Rename FF: "Remove entry" → "Delete game" throughout.
-#                                 Confirm dialog and status messages updated to match.
-#   v1.3.1 (2026-06-26) — Add EE: Category reorder — L2/R2 in the cats column
-#                                 now moves the highlighted category up/down in
-#                                 self.categories, changing section order on save.
-#                                 _move_cat() added.  Cats hint bar updated.
-#   v1.3.0 (2026-06-26) — Remove DD: A/B swap feature removed entirely.
-#                                 swap_ab flag, _resolve_btn, _do_swap_ab,
-#                                 SWAP_AB event, START+SELECT combo, swap item
-#                                 in action menu, and swap field in config.txt
-#                                 all removed.  The feature was non-functional
-#                                 and caused confusion about A/B roles.
-#                                 cfg_load/cfg_save now handle path only.
-#                                 fire() passes btn through to handle() directly.
+#                                 B = keep all and move to next group.
+#                                 Identity-based removal throughout (`is`,
+#                                 never `==`), per the project's core dedup
+#                                 safety rule. Also fixed a latent S_CONFIRM
+#                                 bug found while building this: confirm_cb
+#                                 ran AFTER self.screen was reset to S_MAIN,
+#                                 so a callback re-opening S_CONFIRM (needed
+#                                 for the duplicate-review queue) got
+#                                 silently stomped. Reordered: state resets
+#                                 first, then callback runs and can re-chain.
 #
-#   v1.2.1 (2026-06-25) — Fix CC: r_scroll/r_idx not reset in _sort_cat();
-#                                 sorted list appeared unchanged if scrolled.
-#   v1.2.0 (2026-06-25) — Fix BB: NameError on L1/R1 in right panel — 'd' was
-#                                 scoped inside F_LEFT block, referenced in F_RIGHT.
-#   v1.1.9 (2026-06-25) — Fix Y: Rewrote to raw joystick API (GC API requires
-#                                 GUID in gamecontrollerdb, not set for app launchers).
-#                          Fix Z: JOY_* constants corrected from muOS sdl_map:
-#                                 a:b3 b:b4 y:b5 x:b6 L1:b7 R1:b8 back:b9
-#                                 start:b10 L2:b13 R2:b14 (digital on this device).
-#   v1.1.7 (2026-06-25) — Fix R: browse scroll desync (VISIBLE_BROWSE=10 added).
-#                          Fix S: unsorted entries written bare, no section header.
-#   v1.1.6 (2026-06-25) — Fix N: _resolve_btn missing on App (crash every press).
-#   v1.1.4 (2026-06-25) — Fix G/H/I: combo ordering, hat clear, L1/R1 no repeat.
-#   v1.1.3 (2026-06-25) — Fix E/F: BTN_BACK 5→4; L2/R2 digital button approach.
-#   v1.1.2 (2026-06-25) — Fix A/B/C/D: scroll, held-repeat, clamp, wrap.
+# Earlier history (v1.0.0–v1.7.3), condensed — see git/backup archive for
+# full entries if ever needed:
+#   v1.7.3 — Fix 7: persistent master-category JSON (favourites.txt.master.json),
+#            append-only slug history; reconcile prefers it over .bak_* scanning.
+#   v1.7.2 — Fix 6: PICO-8 category-strip recovery via newest-good .bak_* scan,
+#            30%-overlap guard against false positives.
+#   v1.7.1 — Feature WW: rename/delete category, duplicate-on-assign warning.
+#   v1.7.0 — Feature VV: Suggest New Categories (S_SUGGEST/S_SGFETCH screens).
+#   v1.6.4 — Sync UU: ported Pi-version fixes (entry 'base' field, AUTO_SORT_RULES
+#            dict format, author-keyword matching, scaled BBS watchdog).
+#   v1.6.3 — Fix TT: crash logging added (draw()/handle() wrapped, recover to S_MAIN).
+#   v1.6.2 — Fix SS: check_network() false-offline on Anbernic WiFi drivers fixed.
+#   v1.6.1 — Fix RR: BBS fetch pre-flight check blocked SDL thread, killed by
+#            muOS watchdog — removed; fetch_bbs_tags() handles dead connections itself.
+#   v1.6.0 — Feature QQ: marquee scroll for overflowing titles/category names.
+#   v1.5.6 — UI PP: left panel header stacked (mode label, count, sort indicator).
+#   v1.5.5 — Fix OO: autosort crash — hex int passed to R.fill() instead of RGBA tuple.
+#   v1.5.4 — Fix NN: bold-font height caused 4 separate overlap bugs; row Y's adjusted.
+#   v1.5.3 — Polish MM: bold font (fbd/fbg) added for titles/headers.
+#   v1.5.2 — Polish LL: contrast pass — BG darker, DIM/TEAL/RED/etc. brightened.
+#   v1.5.1 — Fix KK: _as_scroll() vis count didn't match _draw_autosort's scaled formula.
+#   v1.5.0 — Port JJ: multi-device support — sdl_map + screen size read from muOS config.
+#   v1.4.2 — Fix II: no-WiFi toast notification before BBS fetch attempt.
+#   v1.4.1 — Fix HH: S_BBSFETCH→S_AUTOSORT transition bug; stale sel_entry; L1/R1 in autosort.
+#   v1.4.0 — Port GG: auto-sort + BBS tag fetch ported from Pi version (threaded, queue-drained).
+#   v1.3.2 — Rename FF: "Remove entry" → "Delete game" throughout.
+#   v1.3.1 — Add EE: category reorder via L2/R2 in cats column.
+#   v1.3.0 — Remove DD: A/B swap feature removed entirely (non-functional, confusing).
+#            NOTE: buttons_held set in main()'s event loop is a leftover from this
+#            feature — it's still tracked but nothing reads it. Not a bug, just dead
+#            code; safe to remove if touching that area again.
+#   v1.2.1 — Fix CC: r_scroll/r_idx not reset in _sort_cat().
+#   v1.2.0 — Fix BB: NameError on L1/R1 in right panel (variable scoped wrong).
+#   v1.1.9 — Fix Y/Z: rewrote to raw joystick API; JOY_* constants corrected per device sdl_map.
+#   v1.1.7 — Fix R/S: browse scroll desync; unsorted entries written without section header.
+#   v1.1.6 — Fix N: _resolve_btn missing on App (crash every press).
+#   v1.1.4 — Fix G/H/I: combo ordering, hat clear, L1/R1 no repeat.
+#   v1.1.3 — Fix E/F: BTN_BACK index correction; L2/R2 digital button approach.
+#   v1.1.2 — Fix A/B/C/D: scroll, held-repeat, clamp, wrap fixes.
 #
 # Features:
 #   • NEW/UNSORTED list  ←→  ALL ENTRIES toggle (Y on left panel)
@@ -1867,9 +1667,9 @@ class App:
     def _load(self, path):
         try:
             sec, order, uns = parse_file(path)
+            sec, order, uns, recovered, bak_name = reconcile_stripped_categories(path, sec, order, uns)
         except Exception as e:
             self.status="Parse error: "+str(e); self.status_ok=False; return
-        sec, order, uns, recovered, bak_name = reconcile_stripped_categories(path, sec, order, uns)
         self.filepath=path; self.sections=sec
         self.cat_order=order; self.unsorted=uns
         # BUG FIX (revert correctness): merge against DEFAULT_CATS, NOT
@@ -3696,8 +3496,27 @@ class App:
 # Main loop
 # =============================================================================
 
-def main():
+_BOOT_LOG = "/tmp/pico8sorter_crash.log"
+
+def _boot_log(msg):
+    """Best-effort write to the crash log. Startup has no other way to
+    surface a failure — muOS gives the process no console, so an
+    uncaught exception here previously meant total silence: the app
+    just didn't appear, with zero trace of why."""
+    try:
+        with open(_BOOT_LOG, "a") as _f:
+            _f.write(msg)
+    except Exception:
+        pass
+
+def _boot():
+    """Everything that has to succeed before the main loop's own
+    try/except (in fire()/draw()) is even running. Wrapped end-to-end
+    so a boot failure gets logged instead of dying silently."""
+    SDL.SDL_GetError.restype = ctypes.c_char_p
+
     if SDL.SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) != 0:
+        _boot_log(f"\n--- SDL_Init failed: {SDL.SDL_GetError()} ---\n")
         sys.exit("SDL_Init failed")
 
     SDL.SDL_JoystickOpen.argtypes=[ctypes.c_int]
@@ -3724,17 +3543,45 @@ def main():
                 VISIBLE_BROWSE=max(4,(SH-int(130*_SY))//max(1,int(54*_SY)))
         except Exception:
             pass
+
     win=SDL.SDL_CreateWindow(b"PICO-8 Favourites Sorter",
         SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,SW,SH,0)
+    if not win:
+        _boot_log(f"\n--- SDL_CreateWindow failed ({SW}x{SH}): {SDL.SDL_GetError()} ---\n")
+        sys.exit("SDL_CreateWindow failed")
+
     rend=SDL.SDL_CreateRenderer(win,-1,2)
     if not rend:
         rend=SDL.SDL_CreateRenderer(win,-1,1)
+    if not rend:
+        _boot_log(f"\n--- SDL_CreateRenderer failed (accelerated and software): {SDL.SDL_GetError()} ---\n")
+        sys.exit("SDL_CreateRenderer failed")
 
     SDL.SDL_JoystickOpen(0)
     SDL.SDL_JoystickEventState(1)
 
-    R=Renderer(win,rend,find_font(),find_bold_font())
-    app=App(R)
+    try:
+        R=Renderer(win,rend,find_font(),find_bold_font())
+    except Exception:
+        import traceback
+        _boot_log("\n--- Renderer() init crash ---\n")
+        with open(_BOOT_LOG, "a") as _f:
+            traceback.print_exc(file=_f)
+        raise
+
+    try:
+        app=App(R)
+    except Exception:
+        import traceback
+        _boot_log("\n--- App() init crash (likely favourites.txt load/parse/reconcile) ---\n")
+        with open(_BOOT_LOG, "a") as _f:
+            traceback.print_exc(file=_f)
+        raise
+
+    return win, rend, R, app
+
+def main():
+    win, rend, R, app = _boot()
 
     ev=Event()
     running=True

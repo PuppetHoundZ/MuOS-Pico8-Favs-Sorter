@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # HELP: Sort and organise your PICO-8 favourites list into categories
-# ICON: pico8_fav_sorter
+# ICON: pico8
 # GRID: P8 Favourites
 
 . /opt/muos/script/var/func.sh

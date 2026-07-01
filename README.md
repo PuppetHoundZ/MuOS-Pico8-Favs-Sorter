@@ -122,6 +122,3 @@ writes PICO-8's favourites file format. `favourites.txt`'s file *format*
 is defined by PICO-8/Lexaloffle and is not itself covered by this
 project's license; only the code in this repository (the parser,
 reconstruction logic, UI, and related tooling) is MIT-licensed.
-
-Replace `[Kaleb]` above with your preferred name or handle before
-publishing.

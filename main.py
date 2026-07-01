@@ -1,10 +1,54 @@
 #!/usr/bin/env python3
 # =============================================================================
-# PICO-8 Favourites Sorter — muOS Edition  v1.7.11
+# PICO-8 Favourites Sorter — muOS Edition  v1.7.12
 # For: Anbernic RG Cube XX (720×720) running MustardOS
 # Pure Python 3 + SDL2 via ctypes. No pip, no extras needed.
 #
 # Changelog:
+#   v1.7.12 (2026-06-30) — Three changes from user feedback:
+#     (1) DEFAULT_CATS reverted to original 10 (CURRENT FAVORITES through
+#         CLOCKS/UTILITIES/TOYS). The 7 categories added in v1.7.x sessions
+#         (SPORTS/PINBALL, SIM/TYCOON/SANDBOX, HORROR/STEALTH, RHYTHM,
+#         METROIDVANIA, CARD/BOARD/STRATEGY, IDLE/CLICKER) are no longer
+#         pre-seeded on every install — they now surface only via the
+#         existing Suggest-New-Category screen once >= MIN_SUGGEST entries
+#         cluster around that theme, same as any other new-category
+#         proposal. AUTO_SORT_RULES/TAG_TO_CAT keep their entries for all
+#         17 categories unchanged — the existing "cat_name not in
+#         categories: skip" guard already makes a rule dormant until the
+#         category is actually added, so once a suggestion is accepted the
+#         matching auto-sort rule wakes up automatically with no further
+#         code change needed. This also resolves the v1.7.11 naming-overlap
+#         concern: KEYWORD_TO_NEW_CAT/TAG_TO_NEW_CAT renamed to the exact
+#         canonical category strings (was: generic "HORROR"/"SPORTS"/
+#         "CARD & BOARD GAMES"/"SIMULATION"/"IDLE & CLICKER", now matches
+#         AUTO_SORT_RULES exactly), plus added RHYTHM/METROIDVANIA entries
+#         that were missing from the suggestion tables entirely before.
+#         TOWER DEFENCE and MULTIPLAYER remain genuine novel suggestions
+#         with no dormant AUTO_SORT_RULES counterpart (no built-in category
+#         covers them yet).
+#     (2) New suggest_author_categories(): clusters unsorted/all-scope
+#         entries by author, proposing "<AUTHOR> COLLECTION" for any author
+#         with >= MIN_SUGGEST works not already covered by an existing
+#         category (correctly skips authors like "mot" since MOT COLLECTION
+#         already exists — verified via simulation). Wired into
+#         _sg_build_cards() alongside the existing keyword/BBS theme
+#         suggestions; author cards never collide with theme-card names so
+#         they're simply unioned in.
+#     (3) Bug found while stress-testing (1)+(2) together: _sg_apply()'s
+#         entry-relocation loop appended+counted "moved" unconditionally
+#         even when the identity-search failed to find the entry anywhere
+#         in current state. Cross-card overlap (same entry matching both a
+#         theme card and an author card) turns out to be safe — the search
+#         rescans full live state each card, so an already-relocated entry
+#         is still found and cleanly re-homed to whichever card is applied
+#         last. But a stale entries-list reference (e.g. the entry was
+#         deleted via the dupes-review screen while a Suggest-Categories
+#         session was still open with old cards) would have silently
+#         resurrected a "ghost" copy into the new category. Fixed: only
+#         append+count as moved if the identity-search actually found and
+#         removed it; otherwise count as skipped. Verified via direct stub
+#         test exercising the two-card-same-entry path.
 #   v1.7.11 (2026-06-30) — Genre coverage: 5 deferred categories added.
 #                                 Added HORROR / STEALTH, RHYTHM,
 #                                 METROIDVANIA, CARD / BOARD / STRATEGY,
@@ -694,13 +738,6 @@ DEFAULT_CATS = [
     "PLATFORMERS / ADVENTURE",
     "ATMOSPHERIC / WALKING SIMS / NARRATIVE",
     "MUSIC / DEMOSCENE",
-    "SPORTS / PINBALL",
-    "SIM / TYCOON / SANDBOX",
-    "HORROR / STEALTH",
-    "RHYTHM",
-    "METROIDVANIA",
-    "CARD / BOARD / STRATEGY",
-    "IDLE / CLICKER",
     "CLOCKS / UTILITIES / TOYS",
 ]
 
@@ -940,68 +977,82 @@ def bbs_tags_to_category(tags, categories):
 MIN_SUGGEST = 3   # min entries sharing a theme before surfacing a suggestion
 
 TAG_TO_NEW_CAT = {
-    # Horror
-    "horror":            "HORROR",
-    "survival-horror":   "HORROR",
-    # Sports
-    "sports":            "SPORTS",
-    "football":          "SPORTS",
-    "soccer":            "SPORTS",
-    "basketball":        "SPORTS",
-    "baseball":          "SPORTS",
-    "golf":              "SPORTS",
-    "tennis":            "SPORTS",
-    # Card / Board
-    "card-game":         "CARD & BOARD GAMES",
-    "board-game":        "CARD & BOARD GAMES",
-    "tabletop":          "CARD & BOARD GAMES",
-    "deck-building":     "CARD & BOARD GAMES",
-    "poker":             "CARD & BOARD GAMES",
-    "chess":             "CARD & BOARD GAMES",
-    # Tower Defence
+    # Horror / Stealth
+    "horror":            "HORROR / STEALTH",
+    "survival-horror":   "HORROR / STEALTH",
+    "stealth":           "HORROR / STEALTH",
+    # Sports / Pinball
+    "sports":            "SPORTS / PINBALL",
+    "football":          "SPORTS / PINBALL",
+    "soccer":            "SPORTS / PINBALL",
+    "basketball":        "SPORTS / PINBALL",
+    "baseball":          "SPORTS / PINBALL",
+    "golf":              "SPORTS / PINBALL",
+    "tennis":            "SPORTS / PINBALL",
+    "pinball":           "SPORTS / PINBALL",
+    # Card / Board / Strategy
+    "card-game":         "CARD / BOARD / STRATEGY",
+    "board-game":        "CARD / BOARD / STRATEGY",
+    "tabletop":          "CARD / BOARD / STRATEGY",
+    "deck-building":     "CARD / BOARD / STRATEGY",
+    "poker":             "CARD / BOARD / STRATEGY",
+    "chess":             "CARD / BOARD / STRATEGY",
+    # Tower Defence — genuinely novel, no existing category covers it
     "tower-defense":     "TOWER DEFENCE",
     "tower-defence":     "TOWER DEFENCE",
     "td":                "TOWER DEFENCE",
-    # Simulation
-    "simulation":        "SIMULATION",
-    "sim":               "SIMULATION",
-    "city-builder":      "SIMULATION",
-    "farming":           "SIMULATION",
-    "management":        "SIMULATION",
-    # Multiplayer
+    # Sim / Tycoon / Sandbox
+    "simulation":        "SIM / TYCOON / SANDBOX",
+    "sim":               "SIM / TYCOON / SANDBOX",
+    "city-builder":      "SIM / TYCOON / SANDBOX",
+    "farming":           "SIM / TYCOON / SANDBOX",
+    "management":        "SIM / TYCOON / SANDBOX",
+    "tycoon":            "SIM / TYCOON / SANDBOX",
+    # Multiplayer — genuinely novel, no existing category covers it
     "multiplayer":       "MULTIPLAYER",
     "co-op":             "MULTIPLAYER",
     "2-player":          "MULTIPLAYER",
     "local-multiplayer": "MULTIPLAYER",
     # Idle / Clicker
-    "idle":              "IDLE & CLICKER",
-    "clicker":           "IDLE & CLICKER",
-    "incremental":       "IDLE & CLICKER",
+    "idle":              "IDLE / CLICKER",
+    "clicker":           "IDLE / CLICKER",
+    "incremental":       "IDLE / CLICKER",
+    # Rhythm
+    "rhythm":            "RHYTHM",
+    "dance":             "RHYTHM",
+    # Metroidvania
+    "metroidvania":      "METROIDVANIA",
 }
 
 KEYWORD_TO_NEW_CAT = {
-    "horror":    "HORROR",
-    "zombie":    "HORROR",
-    "haunt":     "HORROR",
-    "creep":     "HORROR",
-    "scary":     "HORROR",
-    "terror":    "HORROR",
-    "sport":     "SPORTS",
-    "soccer":    "SPORTS",
-    "footbal":   "SPORTS",
-    "basket":    "SPORTS",
-    "tennis":    "SPORTS",
-    "golf":      "SPORTS",
-    "chess":     "CARD & BOARD GAMES",
-    "poker":     "CARD & BOARD GAMES",
-    "card":      "CARD & BOARD GAMES",
-    "tower def": "TOWER DEFENCE",
-    "idle":      "IDLE & CLICKER",
-    "clicker":   "IDLE & CLICKER",
-    "farm":      "SIMULATION",
-    "simul":     "SIMULATION",
-    "tycoon":    "SIMULATION",
-    "manage":    "SIMULATION",
+    "horror":     "HORROR / STEALTH",
+    "zombie":     "HORROR / STEALTH",
+    "haunt":      "HORROR / STEALTH",
+    "creep":      "HORROR / STEALTH",
+    "scary":      "HORROR / STEALTH",
+    "terror":     "HORROR / STEALTH",
+    "stealth":    "HORROR / STEALTH",
+    "sneak":      "HORROR / STEALTH",
+    "sport":      "SPORTS / PINBALL",
+    "soccer":     "SPORTS / PINBALL",
+    "footbal":    "SPORTS / PINBALL",
+    "basket":     "SPORTS / PINBALL",
+    "tennis":     "SPORTS / PINBALL",
+    "golf":       "SPORTS / PINBALL",
+    "pinball":    "SPORTS / PINBALL",
+    "chess":      "CARD / BOARD / STRATEGY",
+    "poker":      "CARD / BOARD / STRATEGY",
+    "card":       "CARD / BOARD / STRATEGY",
+    "tower def":  "TOWER DEFENCE",
+    "idle":       "IDLE / CLICKER",
+    "clicker":    "IDLE / CLICKER",
+    "farm":       "SIM / TYCOON / SANDBOX",
+    "simul":      "SIM / TYCOON / SANDBOX",
+    "tycoon":     "SIM / TYCOON / SANDBOX",
+    "manage":     "SIM / TYCOON / SANDBOX",
+    "rhythm":     "RHYTHM",
+    "dance":      "RHYTHM",
+    "metroidvania": "METROIDVANIA",
 }
 
 def suggest_new_categories(entries, existing_categories):
@@ -1035,6 +1086,32 @@ def suggest_new_categories_from_tags(tag_cache, existing_categories):
                 buckets[proposed.upper()].append(entry)
                 break
     return {cat: ents for cat, ents in buckets.items() if len(ents) >= MIN_SUGGEST}
+
+def suggest_author_categories(entries, existing_categories):
+    """Scan entries for authors with many works not yet covered by an existing
+    category. Returns dict: 'AUTHOR COLLECTION' -> [entry, ...] for authors
+    with >= MIN_SUGGEST entries, same precedent as the existing MOT COLLECTION
+    bucket. An author can be prolific across several genres and still warrant
+    a single artist-collection category — entries are not excluded just
+    because they also matched a thematic keyword/BBS suggestion.
+    """
+    from collections import defaultdict
+    existing_upper = {c.upper() for c in existing_categories}
+    by_author = defaultdict(list)
+    for entry in entries:
+        author = (entry.get("author") or "").strip()
+        if not author:
+            continue
+        by_author[author.lower()].append(entry)
+    out = {}
+    for author_lower, ents in by_author.items():
+        if len(ents) < MIN_SUGGEST:
+            continue
+        proposed = f"{author_lower.upper()} COLLECTION"
+        if proposed in existing_upper:
+            continue
+        out[proposed] = ents
+    return out
 
 
 SEARCH_PATHS = [
@@ -2859,20 +2936,24 @@ class App:
         return pool
 
     def _sg_build_cards(self):
-        """Compute merged keyword + BBS suggestions, return sorted card list.
+        """Compute merged keyword + BBS + author suggestions, return sorted card list.
         Card: {name:str, entries:[entry,...], selected:bool}
         BBS wins over keyword when entry count is higher (Pi version rule).
+        Author-collection cards are independent of theme cards — names never
+        collide ('X COLLECTION' vs genre names) so they're simply unioned in.
         """
         pool = self._sg_get_pool()
 
-        kw_sugs  = suggest_new_categories(pool, self.categories)
-        bbs_sugs = (suggest_new_categories_from_tags(self._sg_tag_cache, self.categories)
-                    if self._sg_tag_cache else {})
+        kw_sugs     = suggest_new_categories(pool, self.categories)
+        bbs_sugs    = (suggest_new_categories_from_tags(self._sg_tag_cache, self.categories)
+                       if self._sg_tag_cache else {})
+        author_sugs = suggest_author_categories(pool, self.categories)
 
         merged = dict(kw_sugs)
         for cat, ents in bbs_sugs.items():
             if cat not in merged or len(ents) > len(merged[cat]):
                 merged[cat] = ents
+        merged.update(author_sugs)
 
         cards = []
         for proposed, ents in sorted(merged.items()):
@@ -3054,15 +3135,23 @@ class App:
                 created += 1
             for entry in card["entries"]:
                 # Find and remove from current location (identity-based)
+                found = False
                 for lst_name, lst in list(self.sections.items()) + [("__unsorted__", self.unsorted)]:
                     actual = self.unsorted if lst_name == "__unsorted__" else lst
                     for i, e in enumerate(actual):
                         if e is entry:
                             actual.pop(i)
+                            found = True
                             break
-                    else:
-                        continue
-                    break
+                    if found:
+                        break
+                if not found:
+                    # Already moved by an earlier selected card this pass
+                    # (e.g. matched both a theme cluster and an author
+                    # cluster) — do NOT append again, that would duplicate
+                    # the entry across two categories.
+                    skipped += 1
+                    continue
                 self.sections.setdefault(final, []).append(entry)
                 moved += 1
 

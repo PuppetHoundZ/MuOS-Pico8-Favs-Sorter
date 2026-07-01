@@ -107,7 +107,7 @@ its failure there before exiting.
 ## License
 
 This project is licensed under the **MIT License**. See the `LICENSE` file
-(or add one to the repo) for the full text — you're free to use, copy,
+for the full text — you're free to use, copy,
 modify, merge, publish, distribute, sublicense, and sell copies, provided
 the copyright notice is retained. Provided "as is," with no warranty.
 
